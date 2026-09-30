@@ -28,6 +28,15 @@ app = FastAPI(title="TranspoZ", docs_url="/api/docs", openapi_url="/api/openapi.
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET", "POST"], allow_headers=["*"])
 
 
+@app.middleware("http")
+async def revalidate_static(request, call_next):
+    # Sans cela, le navigateur peut garder un ancien app.js avec une page plus récente.
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
+
 @app.get("/api/status")
 def status() -> dict:
     engine = omr.get_engine()
