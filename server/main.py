@@ -21,7 +21,7 @@ WEB_DIR = ROOT / "web"
 OSMD_BUILD = ROOT / "node_modules" / "opensheetmusicdisplay" / "build"
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "25"))
 MAX_FILES = 30
-# Origines autorisées à appeler l'API (ex. le site GitHub Pages), séparées par des virgules.
+# Origines autorisées à appeler l'API (interface hébergée ailleurs), séparées par des virgules.
 CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 
 app = FastAPI(title="TranspoZ", docs_url="/api/docs", openapi_url="/api/openapi.json")
