@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TranspoZ</title>
+  <meta name="description" content="Transposez une partition PDF ou JPG pour votre instrument, en direct, puis imprimez-la.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎼</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar no-print">
+    <h1>Transpo<span>Z</span></h1>
+    <p>Transposez une partition PDF ou JPG pour n'importe quel instrument, en direct.</p>
+  </header>
+
+  <main class="layout">
+    <aside class="panel no-print" aria-label="Réglages">
+      <section class="card">
+        <h2><span class="num">1</span> Partition d'origine</h2>
+
+        <label class="dropzone" id="dropzone">
+          <input type="file" id="file-input" multiple
+                 accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.musicxml,.xml,.mxl,application/pdf,image/*">
+          <strong>Déposez la partition ici</strong>
+          <span>ou cliquez pour choisir un fichier</span>
+          <small>PDF, JPG, PNG (plusieurs pages possibles) ou MusicXML</small>
+        </label>
+        <button type="button" class="link" id="sample-btn">Essayer avec un exemple</button>
+
+        <div class="status" id="status" role="status" aria-live="polite"></div>
+
+        <div class="field">
+          <label for="title">Morceau</label>
+          <input type="text" id="title" placeholder="Titre du morceau">
+        </div>
+
+        <div class="field">
+          <label for="src-instrument">Instrument de la partition</label>
+          <select id="src-instrument"></select>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="src-pitch">Hauteur</label>
+            <select id="src-pitch"></select>
+          </div>
+          <div class="field">
+            <label for="src-octave">Octave</label>
+            <select id="src-octave"></select>
+          </div>
+        </div>
+        <p class="hint" id="src-hint"></p>
+      </section>
+
+      <section class="card">
+        <h2><span class="num">2</span> Transposition</h2>
+
+        <div class="field">
+          <label for="tgt-instrument">Transposer pour</label>
+          <select id="tgt-instrument"></select>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label for="tgt-pitch">Hauteur</label>
+            <select id="tgt-pitch"></select>
+          </div>
+          <div class="field">
+            <label for="tgt-octave">Octave</label>
+            <select id="tgt-octave"></select>
+          </div>
+        </div>
+        <p class="hint" id="tgt-hint"></p>
+
+        <div class="field">
+          <label for="semitones">Changer de tonalité</label>
+          <div class="stepper">
+            <button type="button" id="semi-down" aria-label="Un demi-ton plus bas">−</button>
+            <input type="range" id="semitones" min="-12" max="12" step="1" value="0">
+            <button type="button" id="semi-up" aria-label="Un demi-ton plus haut">+</button>
+          </div>
+          <p class="hint" id="semi-label">aucune</p>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="key-pref">Armure</label>
+            <select id="key-pref">
+              <option value="auto">Automatique</option>
+              <option value="sharps">Plutôt des ♯</option>
+              <option value="flats">Plutôt des ♭</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="clef">Clé</label>
+            <select id="clef">
+              <option value="keep">Conserver</option>
+              <option value="auto">Selon l'instrument</option>
+              <option value="G">Sol</option>
+              <option value="G8vb">Sol octaviée</option>
+              <option value="F">Fa</option>
+              <option value="C3">Ut 3e ligne</option>
+              <option value="C4">Ut 4e ligne</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="summary" id="summary" hidden></div>
+      </section>
+
+      <section class="card actions">
+        <button type="button" class="primary" id="print-btn" disabled>🖨️ Imprimer</button>
+        <button type="button" id="download-btn" disabled>⬇️ MusicXML</button>
+        <button type="button" id="original-btn" disabled>👁️ Original</button>
+        <div class="field zoom">
+          <label for="zoom">Zoom</label>
+          <input type="range" id="zoom" min="0.5" max="1.6" step="0.05" value="1">
+        </div>
+      </section>
+    </aside>
+
+    <section class="stage">
+      <div class="original no-print" id="original" hidden></div>
+      <div class="empty no-print" id="empty">
+        <p>🎼</p>
+        <p>La partition transposée s'affichera ici.</p>
+        <p class="hint">Vérifiez la reconnaissance en la comparant à l'original : les partitions
+          manuscrites ou photographiées de travers peuvent contenir des erreurs.</p>
+      </div>
+      <div id="score" class="score" hidden></div>
+    </section>
+  </main>
+
+  <script src="vendor/osmd/opensheetmusicdisplay.min.js"
+          onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/opensheetmusicdisplay@2.1.3/build/opensheetmusicdisplay.min.js'"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
