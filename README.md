@@ -16,6 +16,8 @@ Outil en ligne pour **transposer une partition** fournie en PDF ou en image (JPG
 - Changement de clé optionnel (ex. trombone en clé de fa → trompette en clé de sol).
 - Affichage de l'original à côté pour vérifier la reconnaissance.
 - Impression au format A4 (seule la partition est imprimée).
+- Correction de la reconnaissance : mesures dont la durée ne correspond pas au chiffrage encadrées en rouge ; clic sur une note pour changer sa durée (point compris), sa hauteur, ses altérations, ses liaisons (prolongation ou expression), la supprimer ou la dupliquer ; ajouter une note ou un silence entre deux notes (trait bleu au survol, choix de la durée au clic, hauteur selon la position de la souris) ; couper, fusionner ou rechiffrer les mesures ; annuler/rétablir et raccourcis clavier. Les corrections portent sur la partition d'origine : la transposition reste en direct.
+- Écoute de la partition transposée avec un son de trompette synthétisé (notes écrites ou sons réels, reprises et liaisons prises en compte), tempo réglable et curseur qui suit la lecture.
 
 ## Architecture
 
@@ -25,6 +27,8 @@ web/                 interface (HTML/CSS/JS, sans framework)
   instruments.js     hauteurs et catalogue d'instruments
   app.js             interface, rendu avec OpenSheetMusicDisplay, impression
   mxl.js             lecture MusicXML / .mxl dans le navigateur
+  player.js          lecture audio (synthé trompette Web Audio)
+  editor.js          analyse des mesures et opérations de correction (JS pur, testé sous Node)
   config.js          adresse du serveur de reconnaissance
 server/              API FastAPI
   main.py            POST /api/recognize, GET /api/status, fichiers statiques
@@ -60,20 +64,6 @@ uvicorn server.main:app --reload   # http://localhost:8000
 ```
 
 Sans moteur OMR, l'outil fonctionne quand même avec des fichiers MusicXML (et le bouton « Essayer avec un exemple »).
-
-## GitHub Pages
-
-Le site est publié sur **https://breizhim.github.io/TranspoZ/** par le workflow `.github/workflows/pages.yml`, à chaque push sur la branche par défaut (tests, puis `scripts/build-pages.sh`, puis déploiement).
-
-Activation (une seule fois) : **Settings → Pages → Build and deployment → Source : « GitHub Actions »**, puis relancer le workflow (onglet *Actions* → *GitHub Pages* → *Run workflow*).
-
-GitHub Pages n'héberge que des fichiers statiques : la transposition, l'affichage, l'impression et l'import MusicXML/.mxl fonctionnent entièrement dans le navigateur, mais **la reconnaissance des PDF/JPG a besoin du serveur Python**. Pour l'activer sur la version Pages :
-
-1. déployer le serveur (image Docker ci-dessous) chez un hébergeur : Hugging Face Spaces (Docker, `PORT=7860`), Render, Fly.io, un VPS… ;
-2. créer la variable de dépôt `OMR_API_URL` (**Settings → Secrets and variables → Actions → Variables**) avec l'adresse du serveur, ex. `https://mon-transpoz.hf.space` ;
-3. relancer le workflow. Le serveur accepte les appels d'autres sites (CORS) ; on peut les restreindre avec `CORS_ORIGINS=https://breizhim.github.io`.
-
-Construction locale de la version statique : `npm ci && OMR_API_URL=... ./scripts/build-pages.sh` (résultat dans `_site/`).
 
 ## Docker
 

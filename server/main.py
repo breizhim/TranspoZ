@@ -21,11 +21,20 @@ WEB_DIR = ROOT / "web"
 OSMD_BUILD = ROOT / "node_modules" / "opensheetmusicdisplay" / "build"
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "25"))
 MAX_FILES = 30
-# Origines autorisées à appeler l'API (ex. le site GitHub Pages), séparées par des virgules.
+# Origines autorisées à appeler l'API (interface hébergée ailleurs), séparées par des virgules.
 CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 
 app = FastAPI(title="TranspoZ", docs_url="/api/docs", openapi_url="/api/openapi.json")
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET", "POST"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def revalidate_static(request, call_next):
+    # Sans cela, le navigateur peut garder un ancien app.js avec une page plus récente.
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
 
 
 @app.get("/api/status")

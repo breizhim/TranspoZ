@@ -142,6 +142,8 @@ button.link { border: none; background: none; color: var(--accent); padding: 4px
 }
 .summary p { margin: 2px 0; }
 
+.player { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; margin-bottom: 10px; }
+
 .actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .actions .zoom { grid-column: 1 / -1; margin: 4px 0 0; }
 
@@ -155,6 +157,78 @@ button.link { border: none; background: none; color: var(--accent); padding: 4px
   min-height: 200px;
   overflow-x: auto;
 }
+
+/* Édition */
+.editor {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 6%);
+}
+.editor-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.sel-info { flex: 1; min-width: 0; font-weight: 600; }
+.editor-history { display: flex; gap: 6px; }
+.editor-tools { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.tool-group { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.tool-label { font-size: 12px; font-weight: 600; color: var(--muted); margin-right: 2px; }
+.editor button, .editor select { padding: 4px 8px; font-size: 14px; }
+.editor select { width: auto; }
+.editor button[aria-pressed="true"], .editor button.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.editor [data-action="sharp"], .editor [data-action="flat"], .editor [data-action="natural"] { font-size: 18px; line-height: 1; min-width: 34px; }
+.editor-keys { margin: 8px 0 0; font-size: 12px; }
+
+.checks {
+  background: #fdecea;
+  color: #7a1f1a;
+  border: 1px solid #f3c1bc;
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  font-size: 14px;
+}
+.checks button { padding: 0 6px; margin: 0 2px; font-size: 13px; background: #fff; }
+
+/* Insertion : trait bleu au survol d'un espace libre, menu sous la souris */
+.score { position: relative; }
+.score.tz-can-insert { cursor: copy; }
+.insert-line {
+  position: absolute; width: 2px; margin-left: -1px;
+  background: #1c7ed6; border-radius: 1px; pointer-events: none; z-index: 3;
+}
+.insert-label {
+  position: absolute; transform: translate(-50%, -100%);
+  background: #1c7ed6; color: #fff; font-size: 11px; line-height: 1.4;
+  padding: 0 5px; border-radius: 4px; pointer-events: none; z-index: 3; white-space: nowrap;
+}
+.insert-popup {
+  position: fixed; z-index: 20;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+  padding: 6px;
+}
+.ip-step { display: flex; flex-direction: column; gap: 4px; }
+.ip-step[hidden] { display: none; }
+#ip-kind { flex-direction: row; }
+.insert-popup button { padding: 4px 10px; font-size: 14px; }
+.ip-title { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0 2px; }
+.ip-types { display: grid; grid-template-columns: repeat(3, auto); gap: 4px; }
+.ip-dot { font-size: 13px; display: flex; align-items: center; gap: 4px; padding: 2px; }
+#ip-pitch { color: var(--muted); font-size: 12px; }
+
+/* Notes cliquables et mesures à vérifier (dans le SVG d'OSMD) */
+.score .tz-note { cursor: pointer; }
+.score .tz-note:hover path { fill: #8a2c2c; stroke: #8a2c2c; }
+.score .tz-note.tz-selected path { fill: #d9480f; stroke: #d9480f; }
+.score .tz-flag { fill: rgb(220 40 30 / 12%); stroke: rgb(200 40 30 / 45%); stroke-width: 1; }
 
 .empty {
   text-align: center;
@@ -184,7 +258,7 @@ button.link { border: none; background: none; color: var(--accent); padding: 4px
 @media print {
   @page { size: A4; margin: 10mm; }
   body { background: #fff; }
-  .no-print { display: none !important; }
+  .no-print, .tz-flag { display: none !important; }
   .layout { display: block; padding: 0; }
   .score { border: none; border-radius: 0; overflow: visible; }
   .score svg { width: 100% !important; height: auto !important; }
