@@ -15,6 +15,11 @@ import {
   soundingOffset,
   semitoneLabel,
 } from "./instruments.js";
+import { readMusicXML, isMusicXMLName } from "./mxl.js";
+
+// Adresse du serveur de reconnaissance (config.js). Vide = même origine que la page.
+const API_BASE = (window.TRANSPOZ_CONFIG?.apiUrl ?? "").trim().replace(/\/+$/, "");
+const apiUrl = (path) => (API_BASE ? `${API_BASE}/${path}` : path);
 
 const $ = (id) => document.getElementById(id);
 
@@ -253,18 +258,45 @@ function showOriginals(files) {
   if (!state.originals.length) ui.original.hidden = true;
 }
 
-function loadSource(xml, title) {
+function loadSource(xml, title, fallbackTitle = null) {
   state.sourceXml = xml;
   const doc = new DOMParser().parseFromString(xml, "application/xml");
-  ui.title.value = title || scoreTitle(doc) || ui.title.value;
+  ui.title.value = title || scoreTitle(doc) || fallbackTitle || ui.title.value;
   return update();
+}
+
+// null = pas encore vérifié ; sinon { reachable, engine }.
+let server = null;
+
+async function checkServer() {
+  try {
+    const res = await fetch(apiUrl("api/status"));
+    const body = res.ok ? await res.json() : null;
+    server = { reachable: Boolean(body), engine: body?.engine ?? null };
+  } catch {
+    server = { reachable: false, engine: null };
+  }
+  return server;
+}
+
+const NO_OMR_MESSAGE =
+  "La reconnaissance des PDF et images nécessite un serveur TranspoZ, non disponible ici. " +
+  "Importez un fichier MusicXML (exportable depuis MuseScore, Finale, Sibelius…) ou utilisez une instance avec serveur.";
+
+async function recognizeOnServer(files) {
+  const form = new FormData();
+  for (const f of files) form.append("files", f, f.name);
+  const res = await fetch(apiUrl("api/recognize"), { method: "POST", body: form });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || `Erreur serveur (${res.status})`);
+  return body;
 }
 
 async function handleFiles(fileList) {
   const files = [...fileList];
   if (!files.length) return;
   showOriginals(files);
-  const needsOMR = files.some((f) => !/\.(musicxml|xml|mxl)$/i.test(f.name));
+  const needsOMR = files.some((f) => !isMusicXMLName(f.name));
   setStatus(
     needsOMR
       ? `Reconnaissance des notes en cours (${files.length} fichier${files.length > 1 ? "s" : ""})… cela peut prendre une minute par page.`
@@ -273,13 +305,17 @@ async function handleFiles(fileList) {
   );
   ui.dropzone.classList.add("busy");
   try {
-    const form = new FormData();
-    for (const f of files) form.append("files", f, f.name);
-    const res = await fetch("api/recognize", { method: "POST", body: form });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.detail || `Erreur serveur (${res.status})`);
     const fallbackTitle = files[0].name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
-    await loadSource(body.musicxml, body.title || fallbackTitle);
+    if (!needsOMR && files.length === 1) {
+      // MusicXML : lu directement dans le navigateur, sans serveur.
+      const xml = await readMusicXML(new Uint8Array(await files[0].arrayBuffer()));
+      await loadSource(xml, null, fallbackTitle);
+      setStatus("Partition chargée.");
+      return;
+    }
+    if (!(server ?? (await checkServer())).reachable) throw new Error(NO_OMR_MESSAGE);
+    const body = await recognizeOnServer(files);
+    await loadSource(body.musicxml, body.title, fallbackTitle);
     const engine = body.engine ? ` avec ${body.engine}` : "";
     setStatus(`Partition chargée${engine}. Comparez-la à l'original pour vérifier la reconnaissance.`);
   } catch (err) {
@@ -388,11 +424,12 @@ ui.originalBtn.addEventListener("click", () => {
 });
 
 update();
-fetch("api/status")
-  .then((r) => r.json())
-  .then((s) => {
-    if (!s.engine) {
-      setStatus("⚠️ Aucun moteur de reconnaissance installé sur ce serveur : seuls les fichiers MusicXML sont acceptés.");
-    }
-  })
-  .catch(() => {});
+checkServer().then((s) => {
+  if (ui.status.textContent) return;
+  if (!s.reachable) {
+    setStatus("ℹ️ Version en ligne sans serveur : importez un fichier MusicXML ou essayez l'exemple. " +
+      "La reconnaissance des PDF/JPG nécessite le serveur TranspoZ.");
+  } else if (!s.engine) {
+    setStatus("⚠️ Aucun moteur de reconnaissance installé sur ce serveur : seuls les fichiers MusicXML sont acceptés.");
+  }
+});

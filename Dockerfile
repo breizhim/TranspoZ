@@ -38,5 +38,6 @@ COPY --from=web /app/node_modules ./node_modules
 COPY server ./server
 COPY web ./web
 
+ENV PORT=8000
 EXPOSE 8000
-CMD ["uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn server.main:app --host 0.0.0.0 --port ${PORT}"]

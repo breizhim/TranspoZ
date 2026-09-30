@@ -139,3 +139,8 @@ def test_rasterize_pdf(tmp_path):
     doc.save(pdf)
     images = omr.rasterize_pdf(pdf, tmp_path, dpi=50)
     assert [p.name for p in images] == ["doc-p001.png", "doc-p002.png"]
+
+
+def test_cors_allows_external_site(client):
+    r = client.get("/api/status", headers={"Origin": "https://breizhim.github.io"})
+    assert r.headers.get("access-control-allow-origin") in ("*", "https://breizhim.github.io")

@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -20,8 +21,11 @@ WEB_DIR = ROOT / "web"
 OSMD_BUILD = ROOT / "node_modules" / "opensheetmusicdisplay" / "build"
 MAX_UPLOAD_MB = int(os.environ.get("MAX_UPLOAD_MB", "25"))
 MAX_FILES = 30
+# Origines autorisées à appeler l'API (ex. le site GitHub Pages), séparées par des virgules.
+CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",") if o.strip()]
 
 app = FastAPI(title="TranspoZ", docs_url="/api/docs", openapi_url="/api/openapi.json")
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET", "POST"], allow_headers=["*"])
 
 
 @app.get("/api/status")

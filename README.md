@@ -24,6 +24,8 @@ web/                 interface (HTML/CSS/JS, sans framework)
   transpose.js       moteur de transposition MusicXML (JS pur, testé sous Node)
   instruments.js     hauteurs et catalogue d'instruments
   app.js             interface, rendu avec OpenSheetMusicDisplay, impression
+  mxl.js             lecture MusicXML / .mxl dans le navigateur
+  config.js          adresse du serveur de reconnaissance
 server/              API FastAPI
   main.py            POST /api/recognize, GET /api/status, fichiers statiques
   omr.py             moteurs de reconnaissance (Audiveris, oemer)
@@ -59,6 +61,20 @@ uvicorn server.main:app --reload   # http://localhost:8000
 
 Sans moteur OMR, l'outil fonctionne quand même avec des fichiers MusicXML (et le bouton « Essayer avec un exemple »).
 
+## GitHub Pages
+
+Le site est publié sur **https://breizhim.github.io/TranspoZ/** par le workflow `.github/workflows/pages.yml`, à chaque push sur la branche par défaut (tests, puis `scripts/build-pages.sh`, puis déploiement).
+
+Activation (une seule fois) : **Settings → Pages → Build and deployment → Source : « GitHub Actions »**, puis relancer le workflow (onglet *Actions* → *GitHub Pages* → *Run workflow*).
+
+GitHub Pages n'héberge que des fichiers statiques : la transposition, l'affichage, l'impression et l'import MusicXML/.mxl fonctionnent entièrement dans le navigateur, mais **la reconnaissance des PDF/JPG a besoin du serveur Python**. Pour l'activer sur la version Pages :
+
+1. déployer le serveur (image Docker ci-dessous) chez un hébergeur : Hugging Face Spaces (Docker, `PORT=7860`), Render, Fly.io, un VPS… ;
+2. créer la variable de dépôt `OMR_API_URL` (**Settings → Secrets and variables → Actions → Variables**) avec l'adresse du serveur, ex. `https://mon-transpoz.hf.space` ;
+3. relancer le workflow. Le serveur accepte les appels d'autres sites (CORS) ; on peut les restreindre avec `CORS_ORIGINS=https://breizhim.github.io`.
+
+Construction locale de la version statique : `npm ci && OMR_API_URL=... ./scripts/build-pages.sh` (résultat dans `_site/`).
+
 ## Docker
 
 ```bash
@@ -67,6 +83,8 @@ docker build -t transpoz \
   --build-arg AUDIVERIS_DEB_URL=<url du .deb Audiveris> .   # avec Audiveris en plus
 docker run -p 8000:8000 transpoz
 ```
+
+La variable `PORT` change le port d'écoute (ex. `PORT=7860` pour Hugging Face Spaces).
 
 ## Tests
 
