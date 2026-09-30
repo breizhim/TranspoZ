@@ -1,6 +1,6 @@
 {
   "name": "transpoz",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "TranspoZ – transposition de partitions en ligne (PDF/JPG → reconnaissance → transposition en direct)",
   "type": "module",
