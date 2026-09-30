@@ -16,6 +16,8 @@ Outil en ligne pour **transposer une partition** fournie en PDF ou en image (JPG
 - Changement de clé optionnel (ex. trombone en clé de fa → trompette en clé de sol).
 - Affichage de l'original à côté pour vérifier la reconnaissance.
 - Impression au format A4 (seule la partition est imprimée).
+- Correction de la reconnaissance : mesures dont la durée ne correspond pas au chiffrage encadrées en rouge ; clic sur une note pour changer sa durée (point compris), sa hauteur, ses altérations, ses liaisons (prolongation ou expression), la supprimer ou la dupliquer ; ajouter une note ou un silence entre deux notes (trait bleu au survol, choix de la durée au clic, hauteur selon la position de la souris) ; couper, fusionner ou rechiffrer les mesures ; annuler/rétablir et raccourcis clavier. Les corrections portent sur la partition d'origine : la transposition reste en direct.
+- Écoute de la partition transposée avec un son de trompette synthétisé (notes écrites ou sons réels, reprises et liaisons prises en compte), tempo réglable et curseur qui suit la lecture.
 
 ## Architecture
 
@@ -25,6 +27,8 @@ web/                 interface (HTML/CSS/JS, sans framework)
   instruments.js     hauteurs et catalogue d'instruments
   app.js             interface, rendu avec OpenSheetMusicDisplay, impression
   mxl.js             lecture MusicXML / .mxl dans le navigateur
+  player.js          lecture audio (synthé trompette Web Audio)
+  editor.js          analyse des mesures et opérations de correction (JS pur, testé sous Node)
   config.js          adresse du serveur de reconnaissance
 server/              API FastAPI
   main.py            POST /api/recognize, GET /api/status, fichiers statiques
