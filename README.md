@@ -2,21 +2,26 @@
 
 Outil en ligne pour **transposer une partition** fournie en PDF ou en image (JPG, PNG) :
 
-1. on dépose la partition, on indique le **morceau**, l'**instrument** et sa **hauteur** (Ut, Si♭, Mi♭, Fa…) ;
+1. on dépose la partition et on indique le **morceau** ;
 2. le serveur **reconnaît les notes** (reconnaissance optique de partitions, « OMR ») et produit un fichier MusicXML ;
-3. on choisit la **transposition** (instrument cible et/ou changement de tonalité) : la partition se met à jour **en direct** dans le navigateur ;
+3. on choisit la **transposition** (tonalité et octave, sur toute la partition ou une sélection) : la partition se met à jour **en direct** dans le navigateur ;
 4. on l'**imprime** (ou on l'enregistre en PDF via la boîte d'impression), ou on télécharge le MusicXML pour la retoucher dans MuseScore.
 
 ## Fonctionnalités
 
 - Import PDF (plusieurs pages), JPG/PNG (plusieurs fichiers = plusieurs pages), ou MusicXML (`.musicxml`, `.xml`, `.mxl`) directement.
-- Catalogue d'instruments (clarinettes, saxophones, trompettes, cor en Fa, cuivres en clé de sol, cordes, guitare…) et hauteur/octave personnalisables.
-- Transposition « vers un instrument » (ex. partie de flûte → clarinette en Si♭) combinable avec un changement de tonalité par demi-tons.
+- Transposition par demi-tons et par octaves, appliquée à toute la partition ou à une sélection seulement.
 - Orthographe musicale correcte : armure recalculée (au plus 6 altérations, préférence ♯/♭ au choix), altérations accidentelles recalculées mesure par mesure, accords chiffrés transposés.
 - Changement de clé optionnel (ex. trombone en clé de fa → trompette en clé de sol).
 - Affichage de l'original à côté pour vérifier la reconnaissance.
 - Impression au format A4 (seule la partition est imprimée).
-- Correction de la reconnaissance : mesures dont la durée ne correspond pas au chiffrage encadrées en rouge ; clic sur une note pour changer sa durée (point compris), sa hauteur, ses altérations, ses liaisons (prolongation ou expression), la supprimer ou la dupliquer ; ajouter une note ou un silence entre deux notes (trait bleu au survol, choix de la durée au clic, hauteur selon la position de la souris) ; couper, fusionner ou rechiffrer les mesures ; annuler/rétablir et raccourcis clavier. Les corrections portent sur la partition d'origine : la transposition reste en direct.
+- Encart « Modification » au-dessus de la partition, avec des modes :
+  - **Lecture** (par défaut) : un clic place la barre de lecture, la lecture part de là ;
+  - **Notes** : clic sur une note pour changer sa durée (point compris), sa hauteur, ses altérations, ses liaisons (prolongation ou expression), la supprimer ou la dupliquer ; ajout d'une note ou d'un silence entre deux notes (trait bleu au survol, hauteur selon la position de la souris) ; couper ou fusionner des mesures ;
+  - **Transposition** : tonalité et octave, préférence d'armure ; tonalité et octave ne s'appliquent qu'à la sélection (en orange) : toute la partition par défaut, rien, ou une zone choisie par deux clics entre les notes (avec changement d'armure si elle suit les barres de mesure) ;
+  - **Nuances** : pp, mf, ff… et indications (cresc., rit.…) ; clic sur une barre de mesure pour un repère encadré (A, B, C…) ;
+  - **Clé & mesure** : clé, armure (appliquée ou non aux notes) et chiffrage à partir d'une mesure.
+- Mesures dont la durée ne correspond pas au chiffrage encadrées en rouge ; annuler/rétablir et raccourcis clavier. Les corrections portent sur la partition d'origine : la transposition reste en direct.
 - Écoute de la partition transposée avec un son de trompette synthétisé (notes écrites ou sons réels, reprises et liaisons prises en compte), tempo réglable et curseur qui suit la lecture.
 
 ## Architecture
@@ -24,7 +29,6 @@ Outil en ligne pour **transposer une partition** fournie en PDF ou en image (JPG
 ```
 web/                 interface (HTML/CSS/JS, sans framework)
   transpose.js       moteur de transposition MusicXML (JS pur, testé sous Node)
-  instruments.js     hauteurs et catalogue d'instruments
   app.js             interface, rendu avec OpenSheetMusicDisplay, impression
   mxl.js             lecture MusicXML / .mxl dans le navigateur
   player.js          lecture audio (synthé trompette Web Audio)

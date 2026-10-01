@@ -4,14 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>TranspoZ</title>
-  <meta name="description" content="Transposez une partition PDF ou JPG pour votre instrument, en direct, puis imprimez-la.">
+  <meta name="description" content="Transposez une partition PDF ou JPG en direct, corrigez-la, écoutez-la, puis imprimez-la.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎼</text></svg>">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="topbar no-print">
     <h1>Transpo<span>Z</span></h1>
-    <p>Transposez une partition PDF ou JPG pour n'importe quel instrument, en direct.</p>
+    <p>Transposez une partition PDF ou JPG en direct, corrigez-la et écoutez-la.</p>
   </header>
 
   <main class="layout">
@@ -35,97 +35,20 @@
           <input type="text" id="title" placeholder="Titre du morceau">
         </div>
 
-        <div class="field">
-          <label for="src-instrument">Instrument de la partition</label>
-          <select id="src-instrument"></select>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="src-pitch">Hauteur</label>
-            <select id="src-pitch"></select>
-          </div>
-          <div class="field">
-            <label for="src-octave">Octave</label>
-            <select id="src-octave"></select>
-          </div>
-        </div>
-        <p class="hint" id="src-hint"></p>
       </section>
 
-      <section class="card">
-        <h2><span class="num">2</span> Transposition</h2>
-
-        <div class="field">
-          <label for="tgt-instrument">Transposer pour</label>
-          <select id="tgt-instrument"></select>
-        </div>
-        <div class="field-row">
-          <div class="field">
-            <label for="tgt-pitch">Hauteur</label>
-            <select id="tgt-pitch"></select>
-          </div>
-          <div class="field">
-            <label for="tgt-octave">Octave</label>
-            <select id="tgt-octave"></select>
-          </div>
-        </div>
-        <p class="hint" id="tgt-hint"></p>
-
-        <div class="field">
-          <label for="semitones">Changer de tonalité</label>
-          <div class="stepper">
-            <button type="button" id="semi-down" aria-label="Un demi-ton plus bas">−</button>
-            <input type="range" id="semitones" min="-12" max="12" step="1" value="0">
-            <button type="button" id="semi-up" aria-label="Un demi-ton plus haut">+</button>
-          </div>
-          <p class="hint" id="semi-label">aucune</p>
-        </div>
-
-        <div class="field-row">
-          <div class="field">
-            <label for="key-pref">Armure</label>
-            <select id="key-pref">
-              <option value="auto">Automatique</option>
-              <option value="sharps">Plutôt des ♯</option>
-              <option value="flats">Plutôt des ♭</option>
-            </select>
-          </div>
-          <div class="field">
-            <label for="clef">Clé</label>
-            <select id="clef">
-              <option value="keep">Conserver</option>
-              <option value="auto">Selon l'instrument</option>
-              <option value="G">Sol</option>
-              <option value="G8vb">Sol octaviée</option>
-              <option value="F">Fa</option>
-              <option value="C3">Ut 3e ligne</option>
-              <option value="C4">Ut 4e ligne</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="summary" id="summary" hidden></div>
-      </section>
 
       <section class="card">
-        <h2><span class="num">3</span> Écouter</h2>
+        <h2><span class="num">2</span> Écouter</h2>
         <div class="player">
           <button type="button" class="primary" id="play-btn" disabled>▶️ Jouer</button>
           <button type="button" id="stop-btn" disabled aria-label="Revenir au début">⏹️ Stop</button>
         </div>
         <div class="field">
-          <label for="play-pitch">Notes jouées</label>
-          <select id="play-pitch">
-            <option value="written">Telles qu'écrites sur la partition</option>
-            <option value="concert">Sons réels de l'instrument choisi</option>
-          </select>
-        </div>
-        <div class="field">
           <label for="tempo">Tempo : <span id="tempo-label">100</span> à la noire</label>
           <input type="range" id="tempo" min="30" max="220" step="1" value="100">
         </div>
-        <p class="hint">Son de trompette synthétisé. « Sons réels » : ce qu'on entend quand l'instrument
-          transpositeur joue la partition (une partie pour trompette en Si♭ sonne un ton plus bas qu'écrit).</p>
+        <p class="hint">Son de trompette synthétisé, notes telles qu'écrites sur la partition.</p>
       </section>
 
       <section class="card actions">
@@ -144,86 +67,126 @@
 
       <div class="editor no-print" id="editor" hidden>
         <div class="editor-head">
-          <span id="sel-info" class="sel-info">Cliquez sur une note pour la corriger.</span>
+          <span class="editor-title">Modification</span>
+          <div class="modes" role="group" aria-label="Mode">
+            <button type="button" data-mode="play" aria-pressed="true" title="Cliquer place la barre de lecture">▶ Lecture</button>
+            <button type="button" data-mode="notes" aria-pressed="false" title="Modifier, ajouter des notes et des silences">♪ Notes</button>
+            <button type="button" data-mode="transpose" aria-pressed="false" title="Choisir une zone à transposer">⇆ Transposition</button>
+            <button type="button" data-mode="dynamics" aria-pressed="false" title="Nuances et indications (pp, mf, cresc.…)">Nuances</button>
+            <button type="button" data-mode="clef" aria-pressed="false" title="Clé, armure et chiffrage">Clé &amp; mesure</button>
+          </div>
           <span class="editor-history">
             <button type="button" id="undo-btn" title="Annuler (Ctrl+Z)" disabled>↶ Annuler</button>
             <button type="button" id="redo-btn" title="Rétablir (Ctrl+Y)" disabled>↷ Rétablir</button>
           </span>
         </div>
-        <div class="editor-tools" id="editor-tools">
-          <div class="tool-group" role="group" aria-label="Durée">
-            <span class="tool-label">Durée</span>
-            <button type="button" data-type="whole" title="Ronde (1)">Ronde</button>
-            <button type="button" data-type="half" title="Blanche (2)">Blanche</button>
-            <button type="button" data-type="quarter" title="Noire (3)">Noire</button>
-            <button type="button" data-type="eighth" title="Croche (4)">Croche</button>
-            <button type="button" data-type="16th" title="Double croche (5)">Double</button>
-            <button type="button" data-type="32nd" title="Triple croche (6)">Triple</button>
-            <button type="button" data-action="dot" title="Point (touche .)">Point •</button>
-          </div>
-          <div class="tool-group" role="group" aria-label="Hauteur">
-            <span class="tool-label">Hauteur</span>
-            <button type="button" data-action="up" title="Monter d'un degré (↑)">↑</button>
-            <button type="button" data-action="down" title="Descendre d'un degré (↓)">↓</button>
-            <button type="button" data-action="octave-up" title="Octave au-dessus (Ctrl+↑)">8va ↑</button>
-            <button type="button" data-action="octave-down" title="Octave au-dessous (Ctrl+↓)">8va ↓</button>
-            <button type="button" data-action="sharp" title="Dièse (D)">♯</button>
-            <button type="button" data-action="flat" title="Bémol (B)">♭</button>
-            <button type="button" data-action="natural" title="Bécarre (N)">♮</button>
-          </div>
-          <div class="tool-group" role="group" aria-label="Liaisons">
-            <span class="tool-label">Liaison</span>
-            <button type="button" data-action="link-left" aria-pressed="false" title="Lier à la note de gauche">⌒ à gauche</button>
-            <button type="button" data-action="link-right" aria-pressed="false" title="Lier à la note de droite">à droite ⌒</button>
-          </div>
-          <div class="tool-group" role="group" aria-label="Note">
-            <span class="tool-label">Note</span>
-            <button type="button" data-action="delete" title="Note → silence ; silence → supprimé (Suppr)">Supprimer</button>
-            <button type="button" data-action="duplicate" title="Répéter la note juste après (Insert)">Dupliquer</button>
-            <button type="button" data-action="to-note" title="Transformer le silence en note">Silence → note</button>
-          </div>
-          <div class="tool-group" role="group" aria-label="Mesure">
-            <span class="tool-label">Mesure</span>
-            <button type="button" data-action="split" title="Nouvelle barre de mesure après cette note">Barre après</button>
-            <button type="button" data-action="merge" title="Supprimer la barre à la fin de cette mesure">Fusionner →</button>
-            <select id="time-sig" aria-label="Chiffrage de mesure">
-              <option value="2/4">2/4</option>
-              <option value="3/4">3/4</option>
-              <option value="4/4">4/4</option>
-              <option value="2/2">2/2</option>
-              <option value="3/8">3/8</option>
-              <option value="6/8">6/8</option>
-              <option value="9/8">9/8</option>
-              <option value="12/8">12/8</option>
-              <option value="5/4">5/4</option>
-            </select>
-            <button type="button" data-action="time" title="Appliquer ce chiffrage à partir de cette mesure">Chiffrer</button>
-          </div>
+
+        <div class="mode-panel" data-panel="play">
+          <span id="play-info">Cliquez sur la partition pour choisir où commence la lecture.</span>
+          <button type="button" id="play-from-start" hidden>Revenir au début</button>
         </div>
-        <p class="hint editor-keys">Clavier : ← → note précédente/suivante · ↑ ↓ hauteur · 1 à 6 durée · . point ·
-          D / B / N dièse, bémol, bécarre · Suppr · Échap · survolez un espace entre deux notes pour en ajouter une</p>
+
+        <div class="mode-panel" data-panel="notes" hidden>
+          <div id="sel-info" class="sel-info">Cliquez sur une note pour la corriger, ou entre deux notes pour en ajouter une.</div>
+          <div class="editor-tools" id="editor-tools">
+            <div class="tool-group" role="group" aria-label="Durée">
+              <span class="tool-label">Durée</span>
+              <button type="button" data-type="whole" title="Ronde (1)">Ronde</button>
+              <button type="button" data-type="half" title="Blanche (2)">Blanche</button>
+              <button type="button" data-type="quarter" title="Noire (3)">Noire</button>
+              <button type="button" data-type="eighth" title="Croche (4)">Croche</button>
+              <button type="button" data-type="16th" title="Double croche (5)">Double</button>
+              <button type="button" data-type="32nd" title="Triple croche (6)">Triple</button>
+              <button type="button" data-action="dot" title="Point (touche .)">Point •</button>
+            </div>
+            <div class="tool-group" role="group" aria-label="Hauteur">
+              <span class="tool-label">Hauteur</span>
+              <button type="button" data-action="up" title="Monter d'un degré (↑)">↑</button>
+              <button type="button" data-action="down" title="Descendre d'un degré (↓)">↓</button>
+              <button type="button" data-action="octave-up" title="Octave au-dessus (Ctrl+↑)">8va ↑</button>
+              <button type="button" data-action="octave-down" title="Octave au-dessous (Ctrl+↓)">8va ↓</button>
+              <button type="button" data-action="sharp" title="Dièse (D)">♯</button>
+              <button type="button" data-action="flat" title="Bémol (B)">♭</button>
+              <button type="button" data-action="natural" title="Bécarre (N)">♮</button>
+            </div>
+            <div class="tool-group" role="group" aria-label="Liaisons">
+              <span class="tool-label">Liaison</span>
+              <button type="button" data-action="link-left" aria-pressed="false" title="Lier à la note de gauche">⌒ à gauche</button>
+              <button type="button" data-action="link-right" aria-pressed="false" title="Lier à la note de droite">à droite ⌒</button>
+            </div>
+            <div class="tool-group" role="group" aria-label="Note">
+              <span class="tool-label">Note</span>
+              <button type="button" data-action="delete" title="Note → silence ; silence → supprimé (Suppr)">Supprimer</button>
+              <button type="button" data-action="duplicate" title="Répéter la note juste après (Inser)">Dupliquer</button>
+              <button type="button" data-action="to-note" title="Transformer le silence en note">Silence → note</button>
+            </div>
+            <div class="tool-group" role="group" aria-label="Mesure">
+              <span class="tool-label">Mesure</span>
+              <button type="button" data-action="split" title="Nouvelle barre de mesure après cette note">Barre après</button>
+              <button type="button" data-action="merge" title="Supprimer la barre à la fin de cette mesure">Fusionner →</button>
+            </div>
+          </div>
+          <p class="hint editor-keys">Clavier : ← → note précédente/suivante · ↑ ↓ hauteur · 1 à 6 durée · . point ·
+            D / B / N dièse, bémol, bécarre · Suppr · Échap · survolez un espace entre deux notes pour en ajouter une</p>
+        </div>
+
+        <div class="mode-panel" data-panel="transpose" hidden>
+          <div class="tp-grid">
+            <div class="field tp-full">
+              <label>Sélection à transposer</label>
+              <div class="tp-selection">
+                <button type="button" id="select-all">Tout sélectionner</button>
+                <button type="button" id="select-none">Tout désélectionner</button>
+                <span id="region-info"></span>
+              </div>
+            </div>
+
+            <div class="field tp-wide">
+              <label for="semitones">Tonalité de la sélection</label>
+              <div class="stepper">
+                <button type="button" id="semi-down" aria-label="Un demi-ton plus bas">−</button>
+                <input type="range" id="semitones" min="-12" max="12" step="1" value="0">
+                <button type="button" id="semi-up" aria-label="Un demi-ton plus haut">+</button>
+              </div>
+              <p class="hint" id="semi-label">aucune</p>
+            </div>
+            <div class="field">
+              <label for="octave">Octave de la sélection</label>
+              <select id="octave">
+                <option value="2">+2 octaves</option>
+                <option value="1">+1 octave</option>
+                <option value="0" selected>inchangée</option>
+                <option value="-1">−1 octave</option>
+                <option value="-2">−2 octaves</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="key-pref">Armure</label>
+              <select id="key-pref">
+                <option value="auto">Automatique</option>
+                <option value="sharps">Plutôt des ♯</option>
+                <option value="flats">Plutôt des ♭</option>
+              </select>
+            </div>
+            <div class="summary tp-full" id="summary" hidden></div>
+          </div>
+          <p class="hint">Cliquez entre deux notes pour placer le début de la sélection, puis la fin (en orange).
+            Tonalité et octave ne changent que la sélection : le reste de la partition n'est pas touché.</p>
+        </div>
+
+        <div class="mode-panel" data-panel="dynamics" hidden>
+          <span>Cliquez sur une note (ou entre deux notes) pour ajouter, changer ou retirer une nuance
+            (pp, mf, ff…) ou une indication (cresc., rit.…). Cliquez sur une barre de mesure pour un
+            repère encadré (A, B, C…).</span>
+        </div>
+
+        <div class="mode-panel" data-panel="clef" hidden>
+          <span>Cliquez dans une mesure pour changer la clé, l'armure ou le chiffrage à partir de celle-ci.</span>
+        </div>
       </div>
       <div class="checks no-print" id="checks" hidden></div>
 
-      <div class="insert-popup no-print" id="insert-popup" role="dialog" aria-label="Insérer" hidden>
-        <div class="ip-step" id="ip-kind">
-          <button type="button" data-kind="note">♪ Note <span id="ip-pitch"></span></button>
-          <button type="button" data-kind="rest">Silence</button>
-        </div>
-        <div class="ip-step" id="ip-duration" hidden>
-          <div class="ip-title" id="ip-title"></div>
-          <div class="ip-types">
-            <button type="button" data-type="whole">Ronde</button>
-            <button type="button" data-type="half">Blanche</button>
-            <button type="button" data-type="quarter">Noire</button>
-            <button type="button" data-type="eighth">Croche</button>
-            <button type="button" data-type="16th">Double</button>
-            <button type="button" data-type="32nd">Triple</button>
-          </div>
-          <label class="ip-dot"><input type="checkbox" id="ip-dot"> pointée</label>
-        </div>
-      </div>
-
+      <div class="popup no-print" id="popup" role="dialog" hidden></div>
       <div class="empty no-print" id="empty">
         <p>🎼</p>
         <p>La partition transposée s'affichera ici.</p>

@@ -114,3 +114,14 @@ test("exemple fourni : Au clair de la lune", () => {
   assert.deepEqual(ev.notes.slice(0, 5).map((n) => n.midi % 12), [0, 0, 0, 2, 4]);
   assert.ok(ev.notes.every((n, i, a) => i === 0 || n.start >= a[i - 1].start));
 });
+
+test("début de chaque mesure dans la lecture (reprises)", () => {
+  const doc = score([
+    note("C", 4, 4),
+    bar('<repeat direction="forward"/>', "left") + note("D", 4, 4),
+    note("E", 4, 4) + bar('<repeat direction="backward"/>'),
+    note("F", 4, 4),
+  ]);
+  const { measureStarts } = scoreEvents(doc);
+  assert.deepEqual([...measureStarts], [[0, 0], [1, 4], [2, 8], [3, 20]]);
+});

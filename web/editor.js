@@ -160,6 +160,7 @@ export function analyzeScore(doc) {
   const parts = children(doc.documentElement, "part");
   const notes = [];
   const measures = [];
+  const directions = [];
   const staffOffsets = [];
   let staffOffset = 0;
 
@@ -178,6 +179,8 @@ export function analyzeScore(doc) {
       let pos = 0;
       let maxPos = 0;
       let lastStart = 0;
+      const before = { fifths: keyOf(1), clefs: new Map(clefs), time };
+      const changes = { key: false, clefs: new Set(), time: false };
       for (const el of children(m)) {
         if (el.nodeName === "attributes") {
           divisions = numberOr(childText(el, "divisions"), divisions);
@@ -191,8 +194,13 @@ export function analyzeScore(doc) {
             }
           }
           const t = timeSignature(el);
-          if (t !== undefined) time = t;
+          if (t !== undefined) {
+            time = t;
+            changes.time = true;
+          }
+          if (child(el, "key")) changes.key = true;
           for (const c of children(el, "clef")) {
+            changes.clefs.add(numberOr(c.getAttribute("number"), 1));
             clefs.set(numberOr(c.getAttribute("number"), 1), {
               sign: childText(c, "sign"),
               line: numberOr(childText(c, "line"), childText(c, "sign") === "F" ? 4 : 2),
@@ -203,6 +211,21 @@ export function analyzeScore(doc) {
           pos -= numberOr(childText(el, "duration"), 0) / divisions;
         } else if (el.nodeName === "forward") {
           pos += numberOr(childText(el, "duration"), 0) / divisions;
+        } else if (el.nodeName === "direction") {
+          const localStaff = numberOr(childText(el, "staff"), 1);
+          for (const type of children(el, "direction-type")) {
+            const dyn = child(type, "dynamics");
+            const words = child(type, "words");
+            const rehearsal = child(type, "rehearsal");
+            const value = dyn ? children(dyn)[0]?.nodeName : (rehearsal ?? words)?.textContent.trim();
+            if (!value) continue;
+            const kind = dyn ? "dynamics" : rehearsal ? "rehearsal" : "words";
+            directions.push({
+              index: directions.length, el, part: p, measure: mi, start: pos,
+              staff: staffOffset + localStaff - 1, localStaff, kind, value,
+            });
+            break;
+          }
         } else if (el.nodeName === "note") {
           const grace = Boolean(child(el, "grace"));
           const chord = Boolean(child(el, "chord"));
@@ -251,6 +274,8 @@ export function analyzeScore(doc) {
         staves,
         fifths: keyOf(1),
         clefs: new Map(clefs),
+        before, // armure, clés et chiffrage en vigueur avant la mesure
+        changes, // ce que la mesure change elle-même
       };
       partMeasures.push(measure);
       measures.push(measure);
@@ -270,7 +295,7 @@ export function analyzeScore(doc) {
     staffOffset += staves;
   });
 
-  return { notes, measures, partCount: parts.length, staffOffsets };
+  return { notes, measures, directions, partCount: parts.length, staffOffsets };
 }
 
 // Suite des « événements » (note seule, accord ou silence) d'une voix, dans l'ordre.
@@ -861,26 +886,229 @@ export function mergeWithNextMeasure(doc, i) {
   return { select: i };
 }
 
+// Attributs du début de la mesure (créés si besoin, avant tout contenu).
+function startAttributes(measure) {
+  const doc = measure.ownerDocument;
+  const first = children(measure).find((el) => el.nodeName !== "print" &&
+    !(el.nodeName === "barline" && el.getAttribute("location") === "left"));
+  if (first?.nodeName === "attributes") return first;
+  const attributes = doc.createElement("attributes");
+  measure.insertBefore(attributes, first ?? null);
+  return attributes;
+}
+
+function dropEmptyAttributes(measure) {
+  for (const a of children(measure, "attributes")) if (!children(a).length) measure.removeChild(a);
+}
+
+const sameTime = (a, b) => (a && b ? a.beats === b.beats && a.beatType === b.beatType : a === b);
+
 /** Chiffrage de mesure à partir de la mesure de la note (toutes les parties). */
 export function setTimeSignature(doc, i, beats, beatType) {
   const analysis = analyzeScore(doc);
   const n = analysis.notes[i];
   if (!n) return { error: "Choisissez une note." };
-  for (const part of children(doc.documentElement, "part")) {
-    const m = children(part, "measure")[n.measure];
-    if (!m) continue;
-    let attributes = children(m).find((el) => el.nodeName === "attributes");
-    const firstContent = children(m).find((el) => !["print", "attributes"].includes(el.nodeName) &&
-      !(el.nodeName === "barline" && el.getAttribute("location") === "left"));
-    if (!attributes) {
-      attributes = doc.createElement("attributes");
-      m.insertBefore(attributes, firstContent ?? null);
-    }
-    removeAll(attributes, "time");
-    const time = doc.createElement("time");
-    time.appendChild(makeElement(doc, "beats", beats));
-    time.appendChild(makeElement(doc, "beat-type", beatType));
-    insertOrdered(attributes, time, ATTRIBUTES_ORDER);
-  }
+  setTimeAt(doc, n.measure, beats, beatType);
   return { select: i };
+}
+
+/** Chiffrage à partir d'une mesure (toutes les parties) ; retiré s'il ne change rien. */
+export function setTimeAt(doc, measureIndex, beats, beatType) {
+  const analysis = analyzeScore(doc);
+  for (const part of children(doc.documentElement, "part")) {
+    const m = children(part, "measure")[measureIndex];
+    if (!m) continue;
+    const info = analysis.measures.find((x) => x.el === m);
+    const attributes = startAttributes(m);
+    removeAll(attributes, "time");
+    const wanted = { beats, beatType };
+    if (measureIndex === 0 || !sameTime(info?.before.time, wanted)) {
+      const time = doc.createElement("time");
+      time.appendChild(makeElement(doc, "beats", beats));
+      time.appendChild(makeElement(doc, "beat-type", beatType));
+      insertOrdered(attributes, time, ATTRIBUTES_ORDER);
+    }
+    dropEmptyAttributes(m);
+  }
+  return {};
+}
+
+/**
+ * Armure à partir d'une mesure (d'une partie), jusqu'au prochain changement d'armure.
+ * `applyToNotes` : les notes qui suivaient l'ancienne armure suivent la nouvelle
+ * (les notes avec une altération écrite, et celles qui en dépendent dans la mesure, ne bougent pas).
+ */
+export function setKeyAt(doc, part, measureIndex, fifths, { applyToNotes = true } = {}) {
+  const analysis = analyzeScore(doc);
+  const info = analysis.measures.find((m) => m.part === part && m.index === measureIndex);
+  if (!info) return { error: "Mesure introuvable." };
+  const oldFifths = info.fifths;
+  const attributes = startAttributes(info.el);
+  removeAll(attributes, "key");
+  if (measureIndex === 0 || info.before.fifths !== fifths) {
+    const key = doc.createElement("key");
+    key.appendChild(makeElement(doc, "fifths", fifths));
+    insertOrdered(attributes, key, ATTRIBUTES_ORDER);
+  }
+  dropEmptyAttributes(info.el);
+
+  if (applyToNotes && oldFifths !== fifths) {
+    const later = analysis.measures.find((m) => m.part === part && m.index > measureIndex && m.changes.key);
+    const end = later ? later.index : Infinity;
+    const written = new Set(); // degrés altérés explicitement dans la mesure en cours
+    let currentMeasure = -1;
+    for (const n of analysis.notes) {
+      if (n.part !== part || n.measure < measureIndex || n.measure >= end || !n.pitch) continue;
+      if (n.measure !== currentMeasure) {
+        currentMeasure = n.measure;
+        written.clear();
+      }
+      const slot = `${n.staff}|${n.pitch.step}${n.pitch.octave}`;
+      if (child(n.el, "accidental")) {
+        written.add(slot);
+        continue;
+      }
+      if (written.has(slot) || n.pitch.alter !== keyAlter(oldFifths, n.pitch.step)) continue;
+      const pitchEl = child(n.el, "pitch");
+      const alter = keyAlter(fifths, n.pitch.step);
+      removeAll(pitchEl, "alter");
+      if (alter) pitchEl.insertBefore(makeElement(doc, "alter", alter), child(pitchEl, "octave"));
+    }
+  }
+  return {};
+}
+
+/** Clé d'une portée à partir d'une mesure ; retirée si elle ne change rien. */
+export function setClefAt(doc, part, measureIndex, localStaff, { sign, line, octaveChange = 0 }) {
+  const analysis = analyzeScore(doc);
+  const info = analysis.measures.find((m) => m.part === part && m.index === measureIndex);
+  if (!info) return { error: "Mesure introuvable." };
+  const attributes = startAttributes(info.el);
+  for (const c of children(attributes, "clef")) {
+    if (numberOr(c.getAttribute("number"), 1) === localStaff) attributes.removeChild(c);
+  }
+  const previous = info.before.clefs.get(localStaff);
+  const same = previous && previous.sign === sign && previous.line === line && (previous.octaveChange || 0) === octaveChange;
+  if (measureIndex === 0 || !same) {
+    const clef = doc.createElement("clef");
+    if (info.staves > 1) clef.setAttribute("number", String(localStaff));
+    clef.appendChild(makeElement(doc, "sign", sign));
+    clef.appendChild(makeElement(doc, "line", line));
+    if (octaveChange) clef.appendChild(makeElement(doc, "clef-octave-change", octaveChange));
+    insertOrdered(attributes, clef, ATTRIBUTES_ORDER);
+  }
+  dropEmptyAttributes(info.el);
+  return {};
+}
+
+// ---------------------------------------------------------------------------
+// Nuances et indications
+// ---------------------------------------------------------------------------
+
+export const DYNAMICS = ["ppp", "pp", "p", "mp", "mf", "f", "ff", "fff", "sfz", "fp"];
+
+/** Indications (nuances, textes) placées au même instant d'une mesure. */
+export function annotationsAt(analysis, { part, measure, start }) {
+  return analysis.directions.filter((d) => d.part === part && d.measure === measure && Math.abs(d.start - start) < EPS);
+}
+
+/**
+ * Ajoute une nuance ({ dynamics: "mf" }) ou une indication ({ words: "rit." })
+ * à un emplacement (même cible que insertNote). Une nuance remplace celle déjà là.
+ */
+export function addAnnotation(doc, target, { dynamics = null, words = null }) {
+  if (!dynamics && !words) return { error: "Indication vide." };
+  if (dynamics && !DYNAMICS.includes(dynamics)) return { error: `Nuance inconnue : ${dynamics}` };
+  const analysis = analyzeScore(doc);
+  let parent;
+  let before;
+  let staff;
+  let staves;
+  let part;
+  let measureIndex;
+  let start;
+  if (target.where === "end") {
+    const m = analysis.measures.find((x) => x.part === target.part && x.index === target.measure);
+    if (!m) return { error: "Mesure introuvable." };
+    parent = m.el;
+    before = children(parent, "barline").find((b) => b.getAttribute("location") !== "left") ?? null;
+    ({ staff = 1 } = target);
+    staves = m.staves;
+    part = m.part;
+    measureIndex = m.index;
+    start = analysis.notes.some((x) => x.part === part && x.measure === measureIndex) ? m.actual : 0;
+  } else {
+    const n = analysis.notes[target.index];
+    if (!n) return { error: "Choisissez un emplacement." };
+    const group = chordOf(analysis, target.index);
+    const ref = target.where === "before" ? group[0].el : group[group.length - 1].el;
+    parent = ref.parentNode;
+    before = target.where === "before" ? ref : ref.nextSibling;
+    staff = n.localStaff;
+    staves = analysis.measures.find((m) => m.part === n.part && m.index === n.measure)?.staves ?? 1;
+    part = n.part;
+    measureIndex = n.measure;
+    start = target.where === "before" ? n.start : n.start + n.duration;
+  }
+
+  if (dynamics) {
+    for (const d of annotationsAt(analysis, { part, measure: measureIndex, start })) {
+      if (d.kind === "dynamics" && d.localStaff === staff) d.el.parentNode.removeChild(d.el);
+    }
+  }
+  const below = Boolean(dynamics) || /^(cresc|dim|decresc)/i.test(words ?? "");
+  const direction = makeElement(doc, "direction", null, { placement: below ? "below" : "above" });
+  const type = doc.createElement("direction-type");
+  if (dynamics) {
+    const dyn = doc.createElement("dynamics");
+    dyn.appendChild(doc.createElement(dynamics));
+    type.appendChild(dyn);
+  } else {
+    type.appendChild(makeElement(doc, "words", words, /^(cresc|dim|decresc|dolce|espr)/i.test(words) ? { "font-style": "italic" } : {}));
+  }
+  direction.appendChild(type);
+  if (staves > 1 || staff > 1) direction.appendChild(makeElement(doc, "staff", staff));
+  parent.insertBefore(direction, before);
+  return {};
+}
+
+/** Repère encadré (A, B, C…) au début d'une mesure, sur la première partie ; null pour le retirer. */
+export function setRehearsal(doc, measureIndex, text) {
+  const analysis = analyzeScore(doc);
+  const info = analysis.measures.find((m) => m.part === 0 && m.index === measureIndex);
+  if (!info) return { error: "Mesure introuvable." };
+  for (const d of analysis.directions) {
+    if (d.kind === "rehearsal" && d.part === 0 && d.measure === measureIndex) d.el.parentNode.removeChild(d.el);
+  }
+  const value = text?.trim();
+  if (!value) return {};
+  const direction = makeElement(doc, "direction", null, { placement: "above" });
+  const type = doc.createElement("direction-type");
+  type.appendChild(makeElement(doc, "rehearsal", value, { enclosure: "square" }));
+  direction.appendChild(type);
+  // Au tout début de la mesure, après la barre de gauche et les attributs.
+  const first = children(info.el).find((el) => !["print", "attributes"].includes(el.nodeName) &&
+    !(el.nodeName === "barline" && el.getAttribute("location") === "left"));
+  info.el.insertBefore(direction, first ?? null);
+  return {};
+}
+
+/** Repère proposé pour une mesure : la lettre (ou le nombre) qui suit le repère précédent. */
+export function nextRehearsal(analysis, measureIndex) {
+  const before = analysis.directions
+    .filter((d) => d.kind === "rehearsal" && d.part === 0 && d.measure < measureIndex)
+    .sort((a, b) => a.measure - b.measure);
+  const last = before[before.length - 1]?.value;
+  if (!last) return "A";
+  if (/^\d+$/.test(last)) return String(Number(last) + 1);
+  if (/^[A-Y]$/i.test(last)) return String.fromCharCode(last.charCodeAt(0) + 1);
+  return "A";
+}
+
+/** Retire une indication (rang dans analysis.directions). */
+export function removeAnnotation(doc, index) {
+  const d = analyzeScore(doc).directions[index];
+  if (!d) return { error: "Indication introuvable." };
+  d.el.parentNode.removeChild(d.el);
+  return {};
 }

@@ -10,8 +10,8 @@ import {
   transposeScore,
   keyName,
   scoreTitle,
+  semitoneLabel,
 } from "../web/transpose.js";
-import { findInstrument, instrumentInterval, semitoneLabel } from "../web/instruments.js";
 
 const parse = (xml) => new DOMParser().parseFromString(xml, "text/xml");
 const serialize = (doc) => new XMLSerializer().serializeToString(doc);
@@ -68,18 +68,6 @@ test("resolveInterval choisit une armure lisible", () => {
   // Préférence dièses : Fa majeur + 1 demi-ton → Fa♯ (6♯) plutôt que Sol♭.
   assert.deepEqual(resolveInterval({ diatonic: 1, chromatic: 1 }, -1, "sharps"), { diatonic: 0, chromatic: 1 });
   assert.deepEqual(resolveInterval({ diatonic: 1, chromatic: 1 }, -1, "flats"), { diatonic: 1, chromatic: 1 });
-});
-
-test("instruments : partie en Ut vers clarinette Si♭ = seconde majeure au-dessus", () => {
-  const iv = instrumentInterval(findInstrument("ut"), findInstrument("clarinette-sib"));
-  assert.deepEqual(iv, { diatonic: 1, chromatic: 2 });
-  // Ut → saxophone alto : sixte majeure au-dessus.
-  assert.deepEqual(instrumentInterval(findInstrument("flute"), findInstrument("sax-alto")), { diatonic: 5, chromatic: 9 });
-  // Sax ténor → sax alto : quinte juste au-dessus (sonorité identique).
-  assert.deepEqual(instrumentInterval(findInstrument("sax-tenor"), findInstrument("sax-alto")), { diatonic: -3, chromatic: -5 });
-  // Cor en Fa : Do5 écrit sonne Fa4, que la trompette en Si♭ écrit Sol4.
-  const hornToTrumpet = instrumentInterval(findInstrument("cor-fa"), findInstrument("trompette-sib"));
-  assert.deepEqual(transposePitch({ step: "C", octave: 5 }, hornToTrumpet), { step: "G", alter: 0, octave: 4 });
 });
 
 test("transposeScore : notes, armure et altérations", () => {
@@ -158,4 +146,44 @@ test("semitoneLabel", () => {
   assert.equal(semitoneLabel(0), "aucune");
   assert.equal(semitoneLabel(2), "seconde majeure vers le haut (+2 demi-tons)");
   assert.equal(semitoneLabel(-13), "une octave + seconde mineure vers le bas (−13 demi-tons)");
+});
+
+test("transposeScore : zone alignée sur les mesures (changement d'armure aller-retour)", () => {
+  const doc = parse(score([note("C", 4) + note("E", 4), note("C", 4) + note("F", 4), note("C", 4) + note("B", 4, -1)]));
+  const report = transposeScore(doc, {
+    interval: intervalFromSemitones(0),
+    region: { start: { measure: 1, offset: 0 }, end: { measure: 2, offset: 0 }, interval: intervalFromSemitones(2) },
+  });
+  assert.deepEqual(notesOf(doc).map((n) => n.name), ["C4", "E4", "D4", "G4", "C4", "Bb4"]);
+  assert.deepEqual(fifthsOf(doc), [0, 2, 0], "Ré majeur dans la zone, retour à Do ensuite");
+  assert.equal(notesOf(doc)[5].accidental, "flat");
+  assert.deepEqual(report.parts[0].regionInterval, { diatonic: 1, chromatic: 2 });
+  assert.deepEqual(report.parts[0].interval, { diatonic: 0, chromatic: 0 });
+});
+
+test("transposeScore : zone au milieu d'une mesure (altérations, sans armure)", () => {
+  const doc = parse(score([note("C", 4) + note("D", 4) + note("E", 4) + note("F", 4)]));
+  transposeScore(doc, {
+    region: { start: { measure: 0, offset: 1 }, end: { measure: 0, offset: 3 }, interval: intervalFromSemitones(1) },
+  });
+  const notes = notesOf(doc);
+  assert.deepEqual(notes.map((n) => n.name), ["C4", "Eb4", "F4", "F4"]);
+  assert.deepEqual(notes.map((n) => n.accidental), [null, "flat", null, null]);
+  assert.deepEqual(fifthsOf(doc), [0]);
+});
+
+test("transposeScore : zone + transposition globale (instrument)", () => {
+  const doc = parse(score([note("C", 4), note("C", 4), note("C", 4)]));
+  transposeScore(doc, {
+    interval: intervalFromSemitones(2),
+    region: { start: { measure: 1, offset: 0 }, end: { measure: 2, offset: 0 }, interval: intervalFromSemitones(12) },
+  });
+  assert.deepEqual(notesOf(doc).map((n) => n.name), ["D4", "D5", "D4"]);
+  assert.deepEqual(fifthsOf(doc), [2], "même armure dans et hors de la zone (octave)");
+});
+
+test("transposeScore : zone vide ou inversée ignorée", () => {
+  const doc = parse(score([note("C", 4)]));
+  transposeScore(doc, { region: { start: { measure: 0, offset: 1 }, end: { measure: 0, offset: 0 }, interval: intervalFromSemitones(5) } });
+  assert.deepEqual(notesOf(doc).map((n) => n.name), ["C4"]);
 });

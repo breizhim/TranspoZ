@@ -130,6 +130,25 @@ export function keyName(fifths, mode) {
   return `${major} / ${minor}`;
 }
 
+// Libellé d'un décalage en demi-tons (« tierce majeure vers le haut (+4 demi-tons) »).
+const INTERVAL_NAMES = [
+  "unisson", "seconde mineure", "seconde majeure", "tierce mineure", "tierce majeure",
+  "quarte juste", "triton", "quinte juste", "sixte mineure", "sixte majeure",
+  "septième mineure", "septième majeure",
+];
+
+export function semitoneLabel(semitones) {
+  if (semitones === 0) return "aucune";
+  const abs = Math.abs(semitones);
+  const dir = semitones > 0 ? "vers le haut" : "vers le bas";
+  const octaves = Math.floor(abs / 12);
+  const rest = abs % 12;
+  const parts = [];
+  if (octaves) parts.push(octaves === 1 ? "une octave" : `${octaves} octaves`);
+  if (rest) parts.push(INTERVAL_NAMES[rest]);
+  return `${parts.join(" + ")} ${dir} (${semitones > 0 ? "+" : "−"}${abs} demi-ton${abs > 1 ? "s" : ""})`;
+}
+
 // ---------------------------------------------------------------------------
 // Aides DOM
 // ---------------------------------------------------------------------------
@@ -178,6 +197,10 @@ const NOTE_AFTER_ACCIDENTAL = [
   "notations", "lyric", "play", "listen",
 ];
 const ATTRIBUTES_AFTER_TRANSPOSE = ["for-part", "directive", "measure-style"];
+const ATTRIBUTES_AFTER_KEY = [
+  "time", "staves", "part-symbol", "instruments", "clef", "staff-details", "transpose",
+  ...ATTRIBUTES_AFTER_TRANSPOSE,
+];
 const ATTRIBUTES_AFTER_CLEF = ["staff-details", "transpose", ...ATTRIBUTES_AFTER_TRANSPOSE];
 const SCORE_AFTER_MOVEMENT_TITLE = ["identification", "defaults", "credit", "part-list"];
 
@@ -312,7 +335,12 @@ function setTitle(root, title) {
  *        transposition de l'instrument de sortie (élément <transpose>), null pour ne pas toucher
  * @param {string|null} [options.partName]   nom de partie à afficher (partitions à une seule partie)
  * @param {string|null} [options.title]      titre du morceau
- * @returns {{parts: Array<{id:string, from:{fifths:number, mode:string|null}, to:{fifths:number, mode:string|null}, interval:object}>}}
+ * @param {{start:{measure:number, offset:number}, end:{measure:number, offset:number},
+ *          interval:{diatonic:number, chromatic:number}}|null} [options.region]
+ *        zone (de start inclus à end exclu, offset en noires dans la mesure) qui reçoit en plus
+ *        `region.interval` ; alignée sur des barres de mesure, l'armure change au début et revient à la fin
+ * @returns {{parts: Array<{id:string, from:{fifths:number, mode:string|null}, to:{fifths:number, mode:string|null},
+ *            interval:object, regionInterval:object}>}}
  */
 export function transposeScore(doc, options = {}) {
   const root = doc.documentElement;
@@ -326,6 +354,7 @@ export function transposeScore(doc, options = {}) {
     instrumentTransposition = null,
     partName = null,
     title = null,
+    region = null,
   } = options;
 
   if (title) setTitle(root, title);
@@ -342,36 +371,59 @@ export function transposeScore(doc, options = {}) {
 
   const report = { parts: [] };
   const clefDef = clef ? CLEFS[clef] : null;
+  const zone = region && comparePosition(region.end, region.start) > 0 ? region : null;
+  const isIdentityInterval = (iv) => iv.diatonic === 0 && iv.chromatic === 0;
 
   for (const part of parts) {
     const initial = firstKey(part);
-    const iv = resolveInterval(interval, initial.fifths, keyPreference);
-    const deltaFifths = intervalFifths(iv);
-    const isIdentity = iv.diatonic === 0 && iv.chromatic === 0;
+    const ivOut = resolveInterval(interval, initial.fifths, keyPreference);
+    const ivIn = zone
+      ? resolveInterval(addIntervals(interval, zone.interval), initial.fifths, keyPreference)
+      : ivOut;
+    const shift = { out: intervalFifths(ivOut), in: intervalFifths(ivIn) };
+    // Zone alignée sur les barres de mesure : changement d'armure au début et retour à la fin.
+    const keyChanges = zone && zone.start.offset === 0 && zone.end.offset === 0 && shift.in !== shift.out;
     let staves = 1;
     let transposeWritten = false;
-    // Armure courante par portée (« * » = toutes les portées).
+    let divisions = 1;
+    // Armures d'origine et affichées, par portée (« * » = toutes les portées).
+    const sourceKeys = new Map([["*", initial.fifths]]);
     const keyByStaff = new Map([["*", initial.fifths]]);
     const currentKey = (staff) => keyByStaff.get(staff) ?? keyByStaff.get("*");
 
-    for (const measure of children(part, "measure")) {
+    children(part, "measure").forEach((measure, mi) => {
       const alterations = new Map();
+      const inZone = (offset) => Boolean(zone) &&
+        comparePosition({ measure: mi, offset }, zone.start) >= 0 &&
+        comparePosition({ measure: mi, offset }, zone.end) < 0;
+      if (keyChanges && (mi === zone.start.measure || mi === zone.end.measure)) {
+        ensureKeyAtStart(measure, sourceKeys.get("*"));
+      }
+      let pos = 0;
+      let lastStart = 0;
 
       for (const el of children(measure)) {
         if (el.nodeName === "attributes") {
+          divisions = Number(childText(el, "divisions")) || divisions;
           const stavesText = childText(el, "staves");
           if (stavesText) staves = Number(stavesText) || 1;
+          const iv = inZone(pos) ? ivIn : ivOut;
 
           for (const key of children(el, "key")) {
             const fifthsEl = child(key, "fifths");
             if (!fifthsEl) continue;
-            let fifths = Number(fifthsEl.textContent) + deltaFifths;
+            const source = Number(fifthsEl.textContent);
+            let fifths = source + (iv === ivIn ? shift.in : shift.out);
             while (fifths > 7) fifths -= 12;
             while (fifths < -7) fifths += 12;
-            if (!isIdentity) setText(fifthsEl, fifths);
+            if (fifths !== source) setText(fifthsEl, fifths);
             const number = key.getAttribute("number");
-            if (number) keyByStaff.set(number, fifths);
-            else {
+            if (number) {
+              sourceKeys.set(number, source);
+              keyByStaff.set(number, fifths);
+            } else {
+              sourceKeys.clear();
+              sourceKeys.set("*", source);
               keyByStaff.clear();
               keyByStaff.set("*", fifths);
             }
@@ -390,9 +442,22 @@ export function transposeScore(doc, options = {}) {
             }
             transposeWritten = true;
           }
+        } else if (el.nodeName === "backup") {
+          pos -= (Number(childText(el, "duration")) || 0) / divisions;
+        } else if (el.nodeName === "forward") {
+          pos += (Number(childText(el, "duration")) || 0) / divisions;
         } else if (el.nodeName === "note") {
+          const isChord = Boolean(child(el, "chord"));
+          const duration = child(el, "grace") ? 0 : (Number(childText(el, "duration")) || 0) / divisions;
+          const start = isChord ? lastStart : pos;
+          if (!isChord) {
+            lastStart = pos;
+            pos += duration;
+          }
           const pitchEl = child(el, "pitch");
           if (!pitchEl) continue;
+          const iv = inZone(start) ? ivIn : ivOut;
+          const isIdentity = isIdentityInterval(iv);
           const pitch = transposePitch(readPitch(pitchEl), iv);
           if (!isIdentity) writePitch(pitchEl, pitch);
 
@@ -411,10 +476,11 @@ export function transposeScore(doc, options = {}) {
             alterations.set(slot, pitch.alter);
           }
         } else if (el.nodeName === "harmony") {
-          if (!isIdentity) transposeHarmony(el, iv);
+          const iv = inZone(pos) ? ivIn : ivOut;
+          if (!isIdentityInterval(iv)) transposeHarmony(el, iv);
         }
       }
-    }
+    });
 
     // Pas d'attributs du tout : on ajoute l'élément <transpose> en tête.
     if (instrumentTransposition && !transposeWritten) {
@@ -431,11 +497,32 @@ export function transposeScore(doc, options = {}) {
     report.parts.push({
       id: part.getAttribute("id"),
       from: initial,
-      to: normalizeKey({ fifths: initial.fifths + deltaFifths, mode: initial.mode }),
-      interval: iv,
+      to: normalizeKey({ fifths: initial.fifths + shift.out, mode: initial.mode }),
+      interval: ivOut,
+      regionInterval: ivIn,
     });
   }
   return report;
+}
+
+/** Compare deux positions { measure, offset } (offset en noires dans la mesure). */
+export function comparePosition(a, b) {
+  return a.measure - b.measure || (Math.abs(a.offset - b.offset) < 1e-6 ? 0 : a.offset - b.offset);
+}
+
+// Rend explicite l'armure en vigueur au début d'une mesure (pour pouvoir la changer).
+function ensureKeyAtStart(measure, fifths) {
+  const doc = measure.ownerDocument;
+  const first = children(measure).find((el) => !["print", "barline"].includes(el.nodeName));
+  let attributes = first?.nodeName === "attributes" ? first : null;
+  if (attributes && child(attributes, "key")) return;
+  if (!attributes) {
+    attributes = doc.createElement("attributes");
+    measure.insertBefore(attributes, first ?? null);
+  }
+  const key = doc.createElement("key");
+  key.appendChild(makeElement(doc, "fifths", fifths));
+  insertOrdered(attributes, key, ATTRIBUTES_AFTER_KEY);
 }
 
 function normalizeKey(key) {

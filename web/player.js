@@ -139,16 +139,18 @@ function soundTempo(el) {
  * @param {boolean} [options.concertPitch=false]  hauteurs réelles (applique <transpose>)
  *        plutôt que les notes écrites
  * @returns {{notes: Array<{start:number, duration:number, midi:number, part:number}>,
- *            tempos: Array<{at:number, bpm:number}>, length:number}}
- *          temps en noires ; tempos triés, le premier à 0
+ *            tempos: Array<{at:number, bpm:number}>, length:number, measureStarts:Map<number, number>}}
+ *          temps en noires ; tempos triés, le premier à 0 ; measureStarts : début de la
+ *          première lecture de chaque mesure
  */
 export function scoreEvents(doc, { concertPitch = false } = {}) {
   const root = doc.documentElement;
   const parts = children(root, "part");
   const notes = [];
   const tempoChanges = new Map();
+  const measureStarts = new Map();
   let length = 0;
-  if (!parts.length) return { notes, tempos: [{ at: 0, bpm: DEFAULT_BPM }], length };
+  if (!parts.length) return { notes, tempos: [{ at: 0, bpm: DEFAULT_BPM }], length, measureStarts };
 
   // Les reprises sont lues sur la première partie et appliquées à toutes.
   const order = playbackOrder(children(parts[0], "measure"));
@@ -163,6 +165,7 @@ export function scoreEvents(doc, { concertPitch = false } = {}) {
     for (const index of order) {
       const measure = measures[index];
       if (!measure) continue;
+      if (partIndex === 0 && !measureStarts.has(index)) measureStarts.set(index, measureStart);
       let pos = 0;
       let maxPos = 0;
       let lastStart = 0;
@@ -228,7 +231,7 @@ export function scoreEvents(doc, { concertPitch = false } = {}) {
   notes.sort((a, b) => a.start - b.start || a.midi - b.midi);
   const tempos = [...tempoChanges].sort((a, b) => a[0] - b[0]).map(([at, bpm]) => ({ at, bpm }));
   if (!tempos.length || tempos[0].at > 0) tempos.unshift({ at: 0, bpm: tempos[0]?.bpm ?? DEFAULT_BPM });
-  return { notes, tempos, length };
+  return { notes, tempos, length, measureStarts };
 }
 
 // Conversion noires ↔ secondes selon les changements de tempo (multipliés par `speed`).
@@ -340,10 +343,25 @@ export class TrumpetPlayer {
     this.timer = null;
   }
 
-  /** Charge une partition (Document MusicXML). Arrête la lecture en cours. */
+  /** Charge une partition (Document MusicXML). Arrête la lecture, garde la position. */
   load(doc, { concertPitch = false } = {}) {
-    this.stop();
+    this._silence();
     this.events = scoreEvents(doc, { concertPitch });
+    this.position = Math.min(this.position, this.length);
+  }
+
+  /** Instant de lecture (en noires) d'une position dans une mesure (première lecture). */
+  quarterAt(measure, offset) {
+    const start = this.events?.measureStarts.get(measure);
+    return start == null ? null : start + offset;
+  }
+
+  /** Place la lecture à un instant (en noires) ; continue si elle était en cours. */
+  async seek(quarter) {
+    const wasPlaying = this.playing;
+    if (wasPlaying) this._silence();
+    this.position = Math.max(0, Math.min(quarter, this.length));
+    if (wasPlaying) await this.play();
   }
 
   /** Tempo indiqué sur la partition (première indication, sinon 100). */

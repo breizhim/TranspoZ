@@ -19,6 +19,14 @@ import {
   typeFromQuarters,
   insertNote,
   alterAt,
+  setTimeAt,
+  setKeyAt,
+  setClefAt,
+  addAnnotation,
+  removeAnnotation,
+  annotationsAt,
+  setRehearsal,
+  nextRehearsal,
 } from "../web/editor.js";
 
 const parse = (xml) => new DOMParser().parseFromString(xml, "text/xml");
@@ -241,4 +249,78 @@ test("clé connue pour chaque note", () => {
   const a = analyzeScore(score([n("C", 5, 4)]));
   assert.deepEqual(a.notes[0].clef, { sign: "G", line: 2, octaveChange: 0 });
   assert.deepEqual(a.measures[0].clefs.get(1), { sign: "G", line: 2, octaveChange: 0 });
+});
+
+test("armure : les notes qui la suivaient changent, pas celles avec une altération écrite", () => {
+  const bNat = `<note><pitch><step>B</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><accidental>natural</accidental></note>`;
+  const doc = score([n("B", 4, 4) + n("E", 5, 4), bNat + n("B", 4, 4), n("B", 4, 4) + n("A", 4, 4)]);
+  setKeyAt(doc, 0, 1, -2);
+  // mesure 1 : rien ; mesure 2 : Si bécarre écrit, le Si suivant en dépend ; mesure 3 : Si → Si♭
+  assert.deepEqual(summary(doc), ["0:B4/1", "0:E5/1", "1:B4/1", "1:B4/1", "2:B-14/1", "2:A4/1"]);
+  const a = analyzeScore(doc);
+  assert.equal(a.measures[1].fifths, -2);
+  assert.equal(a.measures[0].fifths, 0);
+  setKeyAt(doc, 0, 1, 0, { applyToNotes: false });
+  assert.equal(doc.getElementsByTagName("key").length, 1, "changement retiré : même armure qu'avant");
+  assert.deepEqual(summary(doc)[4], "2:B-14/1", "notes inchangées");
+});
+
+test("chiffrage et clé à partir d'une mesure", () => {
+  const doc = score([n("C", 5, 4) + n("D", 5, 4), n("E", 5, 4) + n("F", 5, 4) + n("G", 5, 4)]);
+  setTimeAt(doc, 1, 3, 4);
+  assert.deepEqual(statuses(doc), ["ok", "ok"]);
+  setTimeAt(doc, 1, 2, 4);
+  assert.equal(doc.getElementsByTagName("time").length, 1, "retour au chiffrage précédent : changement retiré");
+  setClefAt(doc, 0, 1, 1, { sign: "F", line: 4 });
+  const a = analyzeScore(doc);
+  assert.deepEqual(a.measures[1].clefs.get(1), { sign: "F", line: 4, octaveChange: 0 });
+  assert.equal(a.notes[2].clef.sign, "F");
+  setClefAt(doc, 0, 0, 1, { sign: "G", line: 2, octaveChange: -1 });
+  assert.equal(analyzeScore(doc).notes[0].clef.octaveChange, -1);
+});
+
+test("nuances et indications", () => {
+  const doc = score([n("C", 5, 4) + n("D", 5, 4)]);
+  addAnnotation(doc, { where: "before", index: 1 }, { dynamics: "mf" });
+  addAnnotation(doc, { where: "before", index: 1 }, { words: "cresc." });
+  let a = analyzeScore(doc);
+  assert.deepEqual(annotationsAt(a, { part: 0, measure: 0, start: 1 }).map((d) => d.value), ["mf", "cresc."]);
+  assert.equal(a.directions[1].el.getAttribute("placement"), "below");
+  addAnnotation(doc, { where: "before", index: 1 }, { dynamics: "ff" }); // remplace mf
+  a = analyzeScore(doc);
+  assert.deepEqual(a.directions.map((d) => d.value).sort(), ["cresc.", "ff"]);
+  assert.equal(a.notes[1].start, 1, "la note ne bouge pas");
+  removeAnnotation(doc, a.directions.find((d) => d.value === "cresc.").index);
+  assert.deepEqual(analyzeScore(doc).directions.map((d) => d.value), ["ff"]);
+  addAnnotation(doc, { where: "after", index: 1 }, { words: "rit." });
+  const rit = analyzeScore(doc).directions.find((d) => d.value === "rit.");
+  assert.equal(rit.start, 2);
+  assert.equal(rit.el.getAttribute("placement"), "above");
+});
+
+test("repères encadrés (A, B…) au début des mesures", () => {
+  const doc = score([n("C", 5, 8), n("D", 5, 8), n("E", 5, 8), n("F", 5, 8)]);
+  assert.equal(nextRehearsal(analyzeScore(doc), 1), "A");
+  setRehearsal(doc, 1, "A");
+  let a = analyzeScore(doc);
+  const mark = a.directions.find((d) => d.kind === "rehearsal");
+  assert.deepEqual([mark.measure, mark.start, mark.value], [1, 0, "A"]);
+  assert.equal(mark.el.getElementsByTagName("rehearsal")[0].getAttribute("enclosure"), "square");
+  assert.equal(nextRehearsal(a, 3), "B");
+  assert.equal(nextRehearsal(a, 1), "A", "pas de repère avant la mesure 2");
+  setRehearsal(doc, 1, "Intro"); // remplace
+  a = analyzeScore(doc);
+  assert.deepEqual(a.directions.map((d) => d.value), ["Intro"]);
+  assert.equal(nextRehearsal(a, 2), "A");
+  setRehearsal(doc, 1, "12");
+  assert.equal(nextRehearsal(analyzeScore(doc), 2), "13");
+  setRehearsal(doc, 1, null);
+  assert.equal(analyzeScore(doc).directions.length, 0);
+  assert.deepEqual(summary(doc), ["0:C5/2", "1:D5/2", "2:E5/2", "3:F5/2"]);
+  // Placé après les attributs d'une mesure qui en a.
+  setRehearsal(doc, 0, "A");
+  const first = doc.getElementsByTagName("measure")[0];
+  const names = [];
+  for (let c = first.firstChild; c; c = c.nextSibling) if (c.nodeType === 1) names.push(c.nodeName);
+  assert.deepEqual(names.slice(0, 3), ["attributes", "direction", "note"]);
 });
