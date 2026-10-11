@@ -1,0 +1,72 @@
+name: Application de bureau
+
+# Construit TranspoZ pour Linux (AppImage, .deb, .rpm) et Windows (installateur),
+# avec Audiveris embarqué. À chaque version (tag v*), les fichiers sont joints à la
+# publication GitHub ; sinon ils restent disponibles comme artefacts du workflow.
+
+on:
+  push:
+    tags: ["v*"]
+    # Aussi quand l'application ou l'interface change, pour vérifier les deux constructions.
+    branches: ["**"]
+    paths: ["desktop/**", "web/**", ".github/workflows/desktop.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+          - os: windows-latest
+            target: win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - name: Outils de paquets (.rpm) et écran virtuel
+        if: matrix.target == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm xvfb
+      - run: npm ci
+      - name: Tests
+        if: matrix.target == 'linux'
+        run: npm test
+      - run: npm ci
+        working-directory: desktop
+      - name: Construction
+        run: npm run dist:${{ matrix.target }}
+        working-directory: desktop
+      - name: Vérification de l'application construite (reconnaissance d'une partition)
+        if: matrix.target == 'linux'
+        working-directory: desktop
+        run: TRANSPOZ_SELFTEST="$PWD/test/partition.png" xvfb-run -a dist/linux-unpacked/transpoz --no-sandbox
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TranspoZ-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+            desktop/dist/*.rpm
+            desktop/dist/*.exe
+      - name: Publication
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(desktop/dist/*.AppImage desktop/dist/*.deb desktop/dist/*.rpm desktop/dist/*.exe)
+          gh release create "$GITHUB_REF_NAME" --title "TranspoZ ${GITHUB_REF_NAME#v}" --notes "Voir le README." 2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber

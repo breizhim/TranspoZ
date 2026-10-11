@@ -36,6 +36,7 @@ web/                 interface (HTML/CSS/JS, sans framework)
   mxl.js             lecture MusicXML / .mxl, fichier de relecture (.mxl + originaux)
   player.js          lecture audio (synthé trompette Web Audio)
   editor.js          analyse des mesures et opérations de correction (JS pur, testé sous Node)
+  merge.js           fusion des pages reconnues (application de bureau ; même règle que le serveur)
   config.js          adresse du serveur de reconnaissance
 server/              API FastAPI
   main.py            POST /api/recognize, GET /api/status, fichiers statiques
@@ -60,6 +61,12 @@ La reconnaissance est déléguée à un moteur libre, installé sur le serveur :
 Aucune reconnaissance n'est parfaite : les partitions manuscrites, les photos floues ou de travers donnent des erreurs. Pour de meilleurs résultats, utilisez un PDF d'origine ou un scan à 300 dpi, bien droit. Le bouton « Original » permet de comparer, et le MusicXML exporté peut être corrigé dans MuseScore puis réimporté.
 
 Autres variables : `OMR_TIMEOUT` (secondes, défaut 600), `OMR_PDF_DPI` (défaut 300, pour oemer), `MAX_UPLOAD_MB` (défaut 25).
+
+## Application de bureau (sans serveur)
+
+Linux (`.rpm`, `.deb`, AppImage) et Windows : TranspoZ s'installe comme un logiciel, avec Audiveris
+embarqué — rien d'autre à installer ni à lancer. Fichiers sur la page *Releases* ; détails et
+construction dans [`desktop/README.md`](desktop/README.md).
 
 ## Lancer en local
 

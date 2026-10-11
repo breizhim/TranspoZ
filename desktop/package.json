@@ -1,0 +1,84 @@
+{
+  "name": "transpoz-desktop",
+  "productName": "TranspoZ",
+  "desktopName": "transpoz.desktop",
+  "version": "0.3.0",
+  "description": "TranspoZ – transposition et correction de partitions, application de bureau (sans serveur)",
+  "author": "Breizhim <breizhim@protonmail.com>",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "prepare-web": "node scripts/prepare-web.mjs",
+    "fetch-audiveris": "node scripts/fetch-audiveris.mjs",
+    "start": "electron .",
+    "dist:linux": "node scripts/fetch-audiveris.mjs linux && node scripts/prepare-web.mjs && electron-builder --linux --publish never",
+    "dist:win": "node scripts/fetch-audiveris.mjs win && node scripts/prepare-web.mjs && electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "io.github.breizhim.transpoz",
+    "productName": "TranspoZ",
+    "artifactName": "TranspoZ-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "dist",
+      "buildResources": "resources"
+    },
+    "files": [
+      "main.mjs",
+      "preload.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "staging/web",
+        "to": "web"
+      },
+      {
+        "from": "THIRD_PARTY.md",
+        "to": "THIRD_PARTY.md"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
+      "category": "Audio",
+      "icon": "resources/icon.png",
+      "extraResources": [
+        {
+          "from": "vendor/audiveris-linux",
+          "to": "audiveris"
+        }
+      ],
+      "syncDesktopName": true,
+      "maintainer": "Breizhim <breizhim@protonmail.com>",
+      "synopsis": "Transposition et correction de partitions",
+      "executableName": "transpoz"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "resources/icon.png",
+      "extraResources": [
+        {
+          "from": "vendor/audiveris-win",
+          "to": "audiveris"
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "TranspoZ"
+    }
+  },
+  "homepage": "https://github.com/breizhim/TranspoZ"
+}

@@ -13,7 +13,8 @@ import {
   semitoneLabel,
   UNISON,
 } from "./transpose.js";
-import { readScoreFile, writeScoreFile, isMusicXMLName } from "./mxl.js";
+import { readMusicXML, readScoreFile, writeScoreFile, isMusicXMLName } from "./mxl.js";
+import { mergeScores } from "./merge.js";
 import { TrumpetPlayer } from "./player.js";
 import * as editor from "./editor.js";
 
@@ -378,7 +379,16 @@ function loadSource(xml, title, fallbackTitle = null) {
 // null = pas encore vérifié ; sinon { reachable, engine }.
 let server = null;
 
+// Application de bureau : la reconnaissance est faite par l'application elle-même
+// (Audiveris embarqué), sans serveur. Voir desktop/preload.cjs.
+const desktop = window.transpozDesktop ?? null;
+
 async function checkServer() {
+  if (desktop) {
+    const status = await desktop.status().catch(() => ({ engine: null }));
+    server = { reachable: true, engine: status.engine ?? null };
+    return server;
+  }
   try {
     const res = await fetch(apiUrl("api/status"));
     const body = res.ok ? await res.json() : null;
@@ -394,6 +404,7 @@ const NO_OMR_MESSAGE =
   "Importez un fichier MusicXML (exportable depuis MuseScore, Finale, Sibelius…) ou utilisez une instance avec serveur.";
 
 async function recognizeOnServer(files) {
+  if (desktop) return recognizeInDesktopApp(files);
   const form = new FormData();
   for (const f of files) form.append("files", f, f.name);
   const res = await fetch(apiUrl("api/recognize"), { method: "POST", body: form });
@@ -433,6 +444,17 @@ function attachOriginals(fileList) {
   }
   ui.original.hidden = false;
   setStatus(`Original joint : ${state.originals.map((o) => o.file.name).join(", ")}. Il sera gardé dans la relecture enregistrée (💾).`);
+}
+
+// Même résultat que le serveur : une partition MusicXML par page, fusionnées.
+async function recognizeInDesktopApp(files) {
+  const input = await Promise.all(files.map(async (f) => ({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) })));
+  const result = await desktop.recognize(input);
+  if (result.error) throw new Error(result.error);
+  const scores = await Promise.all(result.pages.map((p) => readMusicXML(p.data)));
+  const musicxml = mergeScores(scores);
+  const title = scoreTitle(new DOMParser().parseFromString(musicxml, "application/xml"));
+  return { musicxml, title, engine: result.engine, pages: scores.length };
 }
 
 async function handleFiles(fileList) {
@@ -2025,6 +2047,8 @@ checkServer().then((s) => {
     setStatus("ℹ️ Version en ligne sans serveur : importez un fichier MusicXML ou essayez l'exemple. " +
       "La reconnaissance des PDF/JPG nécessite le serveur TranspoZ.");
   } else if (!s.engine) {
-    setStatus("⚠️ Aucun moteur de reconnaissance installé sur ce serveur : seuls les fichiers MusicXML sont acceptés.");
+    setStatus(desktop
+      ? "⚠️ Audiveris est introuvable dans l'application : seuls les fichiers MusicXML sont acceptés."
+      : "⚠️ Aucun moteur de reconnaissance installé sur ce serveur : seuls les fichiers MusicXML sont acceptés.");
   }
 });
