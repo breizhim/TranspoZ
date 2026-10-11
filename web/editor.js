@@ -161,6 +161,7 @@ export function analyzeScore(doc) {
   const notes = [];
   const measures = [];
   const directions = [];
+  const wedgeMarks = []; // débuts et fins de soufflets (<wedge>)
   const staffOffsets = [];
   let staffOffset = 0;
 
@@ -181,6 +182,7 @@ export function analyzeScore(doc) {
       let lastStart = 0;
       const before = { fifths: keyOf(1), clefs: new Map(clefs), time };
       const changes = { key: false, clefs: new Set(), time: false };
+      const waiting = []; // repères de soufflet en attente de la note qui les suit
       for (const el of children(m)) {
         if (el.nodeName === "attributes") {
           divisions = numberOr(childText(el, "divisions"), divisions);
@@ -213,6 +215,22 @@ export function analyzeScore(doc) {
           pos += numberOr(childText(el, "duration"), 0) / divisions;
         } else if (el.nodeName === "direction") {
           const localStaff = numberOr(childText(el, "staff"), 1);
+          for (const type of children(el, "direction-type")) {
+            const wedge = child(type, "wedge");
+            if (!wedge) continue;
+            const mark = {
+              el: wedge, direction: el, part: p, measure: mi, start: pos,
+              staff: staffOffset + localStaff - 1, localStaff,
+              type: wedge.getAttribute("type"),
+              number: numberOr(wedge.getAttribute("number"), 1),
+              dx: numberOr(wedge.getAttribute("default-x"), 0),
+              dy: numberOr(wedge.getAttribute("default-y"), null),
+              spread: numberOr(wedge.getAttribute("spread"), null),
+              anchor: null, // rang de la note qui suit, ou "end" (fin de mesure)
+            };
+            wedgeMarks.push(mark);
+            waiting.push(mark);
+          }
           for (const type of children(el, "direction-type")) {
             const dyn = child(type, "dynamics");
             const words = child(type, "words");
@@ -256,10 +274,15 @@ export function analyzeScore(doc) {
             fifths: keyOf(localStaff),
             dots: children(el, "dot").length,
             type: childText(el, "type"),
+            articulations: noteArticulations(el),
           });
+          if (!grace) {
+            for (const mark of waiting) if (mark.anchor == null && mark.localStaff === localStaff) mark.anchor = notes.length - 1;
+          }
         }
         maxPos = Math.max(maxPos, pos);
       }
+      for (const mark of waiting) if (mark.anchor == null) mark.anchor = "end";
       const measure = {
         part: p,
         index: mi,
@@ -276,6 +299,9 @@ export function analyzeScore(doc) {
         clefs: new Map(clefs),
         before, // armure, clés et chiffrage en vigueur avant la mesure
         changes, // ce que la mesure change elle-même
+        rest: !notes.some((n) => n.part === p && n.measure === mi && n.pitch), // que des silences
+        // Pause de plusieurs mesures annoncée par la partition (<multiple-rest>), ou null.
+        multiRest: numberOr(m.getElementsByTagName("multiple-rest")[0]?.textContent, null),
       };
       partMeasures.push(measure);
       measures.push(measure);
@@ -285,6 +311,12 @@ export function analyzeScore(doc) {
     const first = partMeasures[0];
     const pickup = first && first.expected != null && first.actual < first.expected - EPS;
     partMeasures.forEach((m, i) => {
+      // La reconnaissance a vu une pause de plusieurs mesures sans en lire le nombre :
+      // Audiveris met alors 1, valeur qui n'a pas de sens pour une telle pause.
+      if (m.multiRest === 1) {
+        m.status = "count";
+        return;
+      }
       if (m.expected == null || m.implicit) return;
       if (m.actual > m.expected + EPS) m.status = "long";
       else if (m.actual < m.expected - EPS) {
@@ -295,7 +327,76 @@ export function analyzeScore(doc) {
     staffOffset += staves;
   });
 
-  return { notes, measures, directions, partCount: parts.length, staffOffsets };
+  // Soufflets : un début (crescendo / diminuendo) et la fin (stop) de même numéro, dans la même partie.
+  const wedges = [];
+  const open = new Map();
+  for (const mark of wedgeMarks) {
+    const key = `${mark.part}|${mark.number}`;
+    if (mark.type === "crescendo" || mark.type === "diminuendo") open.set(key, mark);
+    else if (mark.type === "stop" && open.has(key)) {
+      const start = open.get(key);
+      open.delete(key);
+      wedges.push({ index: wedges.length, part: start.part, staff: start.staff, localStaff: start.localStaff, type: start.type, start, stop: mark });
+    }
+  }
+
+  return { notes, measures, directions, wedges, partCount: parts.length, staffOffsets };
+}
+
+// ---------------------------------------------------------------------------
+// Articulations (signes au-dessus ou au-dessous de la note)
+// ---------------------------------------------------------------------------
+
+/** Articulations proposées, dans l'ordre d'affichage. */
+export const ARTICULATIONS = ["staccato", "tenuto", "accent", "strong-accent", "staccatissimo", "fermata"];
+
+// Signes qui s'excluent : ajouter l'un retire l'autre.
+const EXCLUSIVE = [["staccato", "staccatissimo"], ["accent", "strong-accent"]];
+
+function noteArticulations(note) {
+  const found = [];
+  for (const notations of children(note, "notations")) {
+    for (const group of children(notations, "articulations")) {
+      for (const a of children(group)) if (ARTICULATIONS.includes(a.nodeName)) found.push(a.nodeName);
+    }
+    if (child(notations, "fermata")) found.push("fermata");
+  }
+  return found;
+}
+
+function removeArticulation(note, name) {
+  for (const notations of children(note, "notations")) {
+    if (name === "fermata") removeAll(notations, "fermata");
+    for (const group of children(notations, "articulations")) {
+      removeAll(group, name);
+      if (!children(group).length) notations.removeChild(group);
+    }
+  }
+  dropEmptyNotations(note);
+}
+
+/** Ajoute ou retire une articulation (sur tout l'accord, notée sur sa première note). */
+export function toggleArticulation(doc, i, name) {
+  if (!ARTICULATIONS.includes(name)) return { error: `Articulation inconnue : ${name}` };
+  const analysis = analyzeScore(doc);
+  const n = analysis.notes[i];
+  if (!n) return { error: "Choisissez une note." };
+  if (n.rest && name !== "fermata") return { error: "Cette articulation ne s'applique qu'à une note." };
+  const group = chordOf(analysis, i);
+  const present = group.some((x) => x.articulations.includes(name));
+  for (const x of group) removeArticulation(x.el, name);
+  if (present) return {};
+  const head = group[0].el;
+  for (const pair of EXCLUSIVE) if (pair.includes(name)) for (const other of pair) if (other !== name) for (const x of group) removeArticulation(x.el, other);
+  const notations = notationsOf(head, true);
+  if (name === "fermata") {
+    notations.appendChild(makeElement(doc, "fermata", null, { type: "upright" }));
+  } else {
+    let articulations = child(notations, "articulations");
+    if (!articulations) articulations = notations.appendChild(doc.createElement("articulations"));
+    articulations.appendChild(doc.createElement(name));
+  }
+  return {};
 }
 
 // Suite des « événements » (note seule, accord ou silence) d'une voix, dans l'ordre.
@@ -751,7 +852,8 @@ export function insertNote(doc, target, { rest = false, pitch = null, type = "qu
     const group = chordOf(analysis, target.index);
     const ref = target.where === "before" ? group[0].el : group[group.length - 1].el;
     parent = ref.parentNode;
-    before = target.where === "before" ? ref : ref.nextSibling;
+    // Avant une note : aussi avant ses indications (nuance, texte, accord), qui restent avec elle.
+    before = target.where === "before" ? attachedStart(ref) : ref.nextSibling;
     voice = n.voice;
     staff = n.localStaff;
     divisions = n.divisions;
@@ -791,6 +893,19 @@ export function insertNote(doc, target, { rest = false, pitch = null, type = "qu
   if (anchor) removeBeams(analysis, anchor);
   const after = analyzeScore(doc);
   return { select: after.notes.findIndex((x) => x.el === note) };
+}
+
+// Éléments placés juste avant une note et qui s'y rattachent (même instant).
+const ATTACHED = ["direction", "harmony", "figured-bass", "sound"];
+
+function attachedStart(note) {
+  let first = note;
+  for (let el = note.previousSibling; el; el = el.previousSibling) {
+    if (el.nodeType !== 1) continue;
+    if (!ATTACHED.includes(el.nodeName)) break;
+    first = el;
+  }
+  return first;
 }
 
 // <divisions> en vigueur à la fin d'une mesure (après un éventuel affinage de la partie).
@@ -1072,6 +1187,101 @@ export function addAnnotation(doc, target, { dynamics = null, words = null }) {
   return {};
 }
 
+// ---------------------------------------------------------------------------
+// Pauses de plusieurs mesures
+// ---------------------------------------------------------------------------
+
+/**
+ * Suite de mesures de silence (dans toutes les parties) qui contient la mesure :
+ * { start, length }, ou null si la mesure contient des notes. La suite s'arrête aux
+ * changements de clé, d'armure, de chiffrage et aux repères, comme une pause multiple.
+ */
+export function restRun(analysis, measureIndex) {
+  const at = (i) => analysis.measures.filter((m) => m.index === i);
+  const isRest = (i) => at(i).length > 0 && at(i).every((m) => m.rest);
+  const breaks = (i) => at(i).some((m) => m.changes.key || m.changes.time || m.changes.clefs.size) ||
+    analysis.directions.some((d) => d.kind === "rehearsal" && d.measure === i);
+  if (!isRest(measureIndex)) return null;
+  let start = measureIndex;
+  while (start > 0 && !breaks(start) && isRest(start - 1)) start--;
+  let end = measureIndex;
+  while (isRest(end + 1) && !breaks(end + 1)) end++;
+  return { start, length: end - start + 1 };
+}
+
+const isRightBarline = (el) => el.nodeName === "barline" && el.getAttribute("location") !== "left";
+
+// Copie vide d'une mesure de silence : seulement ses silences.
+function restMeasureCopy(measure) {
+  const copy = measure.cloneNode(true);
+  for (const el of children(copy)) {
+    if (!["note", "backup", "forward"].includes(el.nodeName)) copy.removeChild(el);
+  }
+  for (const note of children(copy, "note")) for (const name of ["beam", "notations"]) removeAll(note, name);
+  copy.removeAttribute("implicit");
+  return copy;
+}
+
+/**
+ * Fixe la durée (en mesures) de la pause qui contient la mesure : ajoute des mesures
+ * de silence à la fin de la suite, ou retire les dernières. Le nombre est aussi noté
+ * dans la partition (<multiple-rest>) pour l'affichage.
+ */
+export function setRestLength(doc, measureIndex, count) {
+  const analysis = analyzeScore(doc);
+  const run = restRun(analysis, measureIndex);
+  if (!run) return { error: "Cette mesure contient des notes : ce n'est pas une pause." };
+  const wanted = Math.max(1, Math.min(999, Math.round(Number(count) || 1)));
+  for (const part of children(doc.documentElement, "part")) {
+    const measures = children(part, "measure");
+    const runEls = measures.slice(run.start, run.start + run.length);
+    const last = runEls[runEls.length - 1];
+    if (wanted > run.length) {
+      // Les nouvelles mesures vont à la fin ; la barre de fin de suite (finale, reprise) les suit.
+      let after = last;
+      const copies = [];
+      for (let k = run.length; k < wanted; k++) {
+        const copy = restMeasureCopy(last);
+        part.insertBefore(copy, after.nextSibling);
+        copies.push(copy);
+        after = copy;
+      }
+      for (const b of children(last).filter(isRightBarline)) after.appendChild(b);
+    } else if (wanted < run.length) {
+      const kept = runEls[wanted - 1];
+      const removed = runEls.slice(wanted);
+      const next = measures[run.start + run.length];
+      const barlines = children(removed[removed.length - 1]).filter(isRightBarline);
+      for (const m of removed) {
+        // Ce que porte une mesure retirée (attributs, indications) passe à la suivante.
+        if (next) {
+          const anchor = children(next).find((el) => el.nodeName !== "print") ?? null;
+          for (const el of children(m)) if (["attributes", "direction"].includes(el.nodeName)) next.insertBefore(el, anchor);
+        }
+        part.removeChild(m);
+      }
+      if (barlines.length) {
+        for (const b of children(kept).filter(isRightBarline)) kept.removeChild(b);
+        for (const b of barlines) kept.appendChild(b);
+      }
+    }
+    // Nombre de mesures noté sur la première mesure de la pause.
+    for (const m of runEls) {
+      for (const a of children(m, "attributes")) {
+        for (const style of children(a, "measure-style")) if (child(style, "multiple-rest")) a.removeChild(style);
+      }
+      dropEmptyAttributes(m);
+    }
+    if (wanted > 1) {
+      const style = doc.createElement("measure-style");
+      style.appendChild(makeElement(doc, "multiple-rest", wanted));
+      insertOrdered(startAttributes(runEls[0]), style, ATTRIBUTES_ORDER);
+    }
+  }
+  renumberMeasures(doc);
+  return {};
+}
+
 /** Repère encadré (A, B, C…) au début d'une mesure, sur la première partie ; null pour le retirer. */
 export function setRehearsal(doc, measureIndex, text) {
   const analysis = analyzeScore(doc);
@@ -1103,6 +1313,127 @@ export function nextRehearsal(analysis, measureIndex) {
   if (/^\d+$/.test(last)) return String(Number(last) + 1);
   if (/^[A-Y]$/i.test(last)) return String.fromCharCode(last.charCodeAt(0) + 1);
   return "A";
+}
+
+// ---------------------------------------------------------------------------
+// Soufflets (crescendo <, decrescendo >) au format d'Audiveris :
+// <direction><direction-type><wedge type="crescendo" number="1"/></direction-type></direction>
+// juste avant une note (ou en fin de mesure), puis un <wedge type="stop">. OSMD les dessine
+// d'après ces positions ; les décalages default-x / default-y d'Audiveris sont conservés.
+// ---------------------------------------------------------------------------
+
+
+/**
+ * Ancre d'une extrémité : { index } (juste avant la note de ce rang)
+ * ou { part, measure, staff, edge: "start" | "end" } (début ou fin de mesure).
+ */
+function placeDirection(doc, analysis, anchor, direction) {
+  if (anchor.index != null) {
+    const group = chordOf(analysis, anchor.index);
+    const head = group[0].el;
+    head.parentNode.insertBefore(direction, head);
+    return analysis.notes[anchor.index];
+  }
+  const m = analysis.measures.find((x) => x.part === anchor.part && x.index === anchor.measure);
+  if (!m) return null;
+  if (anchor.edge === "start") {
+    const first = children(m.el).find((el) => !["print", "attributes"].includes(el.nodeName) &&
+      !(el.nodeName === "barline" && el.getAttribute("location") === "left"));
+    m.el.insertBefore(direction, first ?? null);
+  } else {
+    m.el.insertBefore(direction, children(m.el, "barline").find((b) => b.getAttribute("location") !== "left") ?? null);
+  }
+  return { part: m.part, localStaff: anchor.staff ?? 1 };
+}
+
+function wedgeDirection(doc, attrs, localStaff, staves) {
+  const direction = makeElement(doc, "direction", null, { placement: "below" });
+  const type = doc.createElement("direction-type");
+  type.appendChild(makeElement(doc, "wedge", null, attrs));
+  direction.appendChild(type);
+  if (staves > 1 || localStaff > 1) direction.appendChild(makeElement(doc, "staff", localStaff));
+  return direction;
+}
+
+/** Ajoute un soufflet entre deux ancres (voir placeDirection) ; type "crescendo" ou "diminuendo". */
+export function addWedge(doc, { type, start, stop, localStaff = 1 }) {
+  if (!["crescendo", "diminuendo"].includes(type)) return { error: `Soufflet inconnu : ${type}` };
+  const analysis = analyzeScore(doc);
+  const ref = start.index != null ? analysis.notes[start.index] : null;
+  const part = ref ? ref.part : start.part;
+  const staff = ref ? ref.localStaff : localStaff;
+  const staves = analysis.measures.find((m) => m.part === part)?.staves ?? 1;
+  // Numéro libre dans la partie (1 à 16), pour ne pas mêler deux soufflets.
+  const used = new Set(analysis.wedges.filter((w) => w.part === part).map((w) => w.start.number));
+  let number = 1;
+  while (used.has(number) && number < 16) number++;
+  // La fin d'abord : insérer le début ne décale pas les rangs des notes.
+  placeDirection(doc, analysis, stop, wedgeDirection(doc, { type: "stop", number }, staff, staves));
+  placeDirection(doc, analysis, start, wedgeDirection(doc, { type, number }, staff, staves));
+  return {};
+}
+
+function removeWedgeMark(mark) {
+  const type = mark.el.parentNode;
+  const direction = mark.direction;
+  type.removeChild(mark.el);
+  if (!children(type).length) direction.removeChild(type);
+  if (!children(direction, "direction-type").length && direction.parentNode) direction.parentNode.removeChild(direction);
+}
+
+/** Retire un soufflet (rang dans analysis.wedges). */
+export function removeWedge(doc, index) {
+  const w = analyzeScore(doc).wedges[index];
+  if (!w) return { error: "Soufflet introuvable." };
+  removeWedgeMark(w.start);
+  removeWedgeMark(w.stop);
+  return {};
+}
+
+/** Change le sens d'un soufflet (crescendo ↔ diminuendo). */
+export function setWedgeType(doc, index, type) {
+  const w = analyzeScore(doc).wedges[index];
+  if (!w) return { error: "Soufflet introuvable." };
+  if (!["crescendo", "diminuendo"].includes(type)) return { error: `Soufflet inconnu : ${type}` };
+  w.start.el.setAttribute("type", type);
+  return {};
+}
+
+// ---------------------------------------------------------------------------
+// Nom des instruments (affiché en début de portée)
+// ---------------------------------------------------------------------------
+
+/** Noms des parties, dans l'ordre : [{ id, name, hidden }]. */
+export function partNames(doc) {
+  const list = child(doc.documentElement, "part-list");
+  return (list ? children(list, "score-part") : []).map((sp) => {
+    const name = child(sp, "part-name");
+    return {
+      id: sp.getAttribute("id"),
+      name: name?.textContent.trim() ?? "",
+      hidden: name?.getAttribute("print-object") === "no",
+    };
+  });
+}
+
+/**
+ * Renomme une partie ; un nom vide la retire de l'affichage (print-object="no").
+ * L'abréviation des lignes suivantes, qui ne correspondrait plus, est retirée.
+ */
+export function setPartName(doc, partIndex, name) {
+  const list = child(doc.documentElement, "part-list");
+  const sp = list ? children(list, "score-part")[partIndex] : null;
+  if (!sp) return { error: "Instrument introuvable." };
+  let el = child(sp, "part-name");
+  if (!el) el = sp.insertBefore(doc.createElement("part-name"), sp.firstChild);
+  const value = String(name ?? "").trim();
+  setText(el, value);
+  if (value) el.removeAttribute("print-object");
+  else el.setAttribute("print-object", "no");
+  removeAll(sp, "part-abbreviation");
+  removeAll(sp, "part-abbreviation-display");
+  removeAll(sp, "part-name-display");
+  return {};
 }
 
 /** Retire une indication (rang dans analysis.directions). */

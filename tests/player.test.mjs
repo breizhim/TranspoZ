@@ -125,3 +125,10 @@ test("début de chaque mesure dans la lecture (reprises)", () => {
   const { measureStarts } = scoreEvents(doc);
   assert.deepEqual([...measureStarts], [[0, 0], [1, 4], [2, 8], [3, 20]]);
 });
+
+test("articulations transmises à la lecture", () => {
+  const art = (names) => `<notations><articulations>${names.map((n) => `<${n}/>`).join("")}</articulations></notations>`;
+  const doc = score([note("C", 4, 1, art(["staccato"])) + note("D", 4, 1, art(["accent", "tenuto"])) + note("E", 4, 2)]);
+  const ev = scoreEvents(doc);
+  assert.deepEqual(ev.notes.map((n) => n.articulation), [["staccato"], ["accent", "tenuto"], []]);
+});

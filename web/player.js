@@ -118,6 +118,17 @@ function midiOf(pitchEl, transpose) {
   return (octave + 1) * 12 + (STEP_SEMITONES[step] ?? 0) + alter + transpose;
 }
 
+// Articulation qui change le jeu : la plus marquante de la note (ou null).
+const PLAYED_ARTICULATIONS = ["staccatissimo", "staccato", "strong-accent", "accent", "tenuto"];
+
+function articulationOf(note) {
+  const found = new Set();
+  for (const group of note.getElementsByTagName("articulations")) {
+    for (let a = group.firstChild; a; a = a.nextSibling) if (a.nodeType === 1) found.add(a.nodeName);
+  }
+  return PLAYED_ARTICULATIONS.filter((a) => found.has(a));
+}
+
 function hasTie(note, type) {
   return children(note, "tie").some((t) => t.getAttribute("type") === type);
 }
@@ -212,7 +223,7 @@ export function scoreEvents(doc, { concertPitch = false } = {}) {
                 previous.duration += duration;
                 current = previous;
               } else {
-                current = { start: at, duration, midi, part: partIndex };
+                current = { start: at, duration, midi, part: partIndex, articulation: articulationOf(el) };
                 notes.push(current);
               }
               if (hasTie(el, "start")) tied.set(midi, current);
@@ -283,7 +294,7 @@ function makeReverb(ctx, seconds = 1.6) {
 // Une note de trompette : deux dents de scie légèrement désaccordées, filtre
 // passe-bas dont l'ouverture suit l'attaque (le « cuivré »), petite montée de
 // hauteur à l'attaque et vibrato qui arrive après un instant.
-function playTrumpetNote(ctx, out, midi, when, duration) {
+function playTrumpetNote(ctx, out, midi, when, duration, level = 1) {
   const f = midiToHz(midi);
   const end = when + duration;
   const release = 0.07;
@@ -318,9 +329,9 @@ function playTrumpetNote(ctx, out, midi, when, duration) {
 
   const amp = ctx.createGain();
   amp.gain.setValueAtTime(0.0001, when);
-  amp.gain.exponentialRampToValueAtTime(0.5, when + 0.03);
-  amp.gain.exponentialRampToValueAtTime(0.36, when + 0.18);
-  amp.gain.setValueAtTime(0.36, end);
+  amp.gain.exponentialRampToValueAtTime(0.5 * level, when + 0.03);
+  amp.gain.exponentialRampToValueAtTime(0.36 * Math.min(level, 1.15), when + 0.18);
+  amp.gain.setValueAtTime(0.36 * Math.min(level, 1.15), end);
   amp.gain.exponentialRampToValueAtTime(0.0001, end + release);
 
   for (const o of oscs) o.connect(filter);
@@ -435,8 +446,15 @@ export class TrumpetPlayer {
         const on = this.time.toSeconds(n.start);
         const off = this.time.toSeconds(n.start + n.duration);
         // Légère séparation entre les notes, comme un coup de langue.
-        const gap = Math.min(0.05, (off - on) * 0.12);
-        playTrumpetNote(this.ctx, bus, n.midi, this.startTime + on, off - on - gap);
+        // Articulations : piqué = note raccourcie, tenuto = liée à la suivante, accents = attaque plus forte.
+        const art = n.articulation ?? [];
+        const length = off - on;
+        let sounding = length - Math.min(0.05, length * 0.12);
+        if (art.includes("staccatissimo")) sounding = Math.min(sounding, length * 0.25);
+        else if (art.includes("staccato")) sounding = Math.min(sounding, length * 0.5);
+        else if (art.includes("tenuto")) sounding = length * 0.98;
+        const level = art.includes("strong-accent") ? 1.7 : art.includes("accent") ? 1.4 : 1;
+        playTrumpetNote(this.ctx, bus, n.midi, this.startTime + on, sounding, level);
       }
       if (this.ctx.currentTime - this.startTime >= endSec + 0.1) {
         this.stop();

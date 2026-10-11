@@ -27,6 +27,14 @@ import {
   annotationsAt,
   setRehearsal,
   nextRehearsal,
+  restRun,
+  setRestLength,
+  toggleArticulation,
+  addWedge,
+  removeWedge,
+  setWedgeType,
+  partNames,
+  setPartName,
 } from "../web/editor.js";
 
 const parse = (xml) => new DOMParser().parseFromString(xml, "text/xml");
@@ -323,4 +331,159 @@ test("repères encadrés (A, B…) au début des mesures", () => {
   const names = [];
   for (let c = first.firstChild; c; c = c.nextSibling) if (c.nodeType === 1) names.push(c.nodeName);
   assert.deepEqual(names.slice(0, 3), ["attributes", "direction", "note"]);
+});
+
+test("pause de plusieurs mesures : détection, allongement, raccourcissement", () => {
+  const whole = '<note><rest measure="yes"/><duration>8</duration><voice>1</voice></note>';
+  const doc = score([n("C", 5, 8), whole, n("D", 5, 8) + '<barline location="right"><bar-style>light-heavy</bar-style></barline>']);
+  assert.equal(restRun(analyzeScore(doc), 0), null);
+  assert.deepEqual(restRun(analyzeScore(doc), 1), { start: 1, length: 1 });
+
+  setRestLength(doc, 1, 8);
+  let measures = [...doc.getElementsByTagName("measure")];
+  assert.equal(measures.length, 10);
+  assert.deepEqual(measures.map((m) => m.getAttribute("number")), ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]);
+  assert.deepEqual(restRun(analyzeScore(doc), 4), { start: 1, length: 8 });
+  assert.equal(measures[1].getElementsByTagName("multiple-rest")[0].textContent, "8");
+  assert.equal(doc.getElementsByTagName("multiple-rest").length, 1);
+  assert.deepEqual(statuses(doc), Array(10).fill("ok"), "chaque mesure de silence est complète");
+  assert.equal(measures[9].getElementsByTagName("barline").length, 1, "la barre finale reste à la fin");
+  assert.deepEqual(summary(doc).at(-1), "9:D5/2");
+
+  setRestLength(doc, 3, 3);
+  measures = [...doc.getElementsByTagName("measure")];
+  assert.equal(measures.length, 5);
+  assert.equal(doc.getElementsByTagName("multiple-rest")[0].textContent, "3");
+  setRestLength(doc, 2, 1);
+  assert.equal(doc.getElementsByTagName("measure").length, 3);
+  assert.equal(doc.getElementsByTagName("multiple-rest").length, 0);
+  assert.match(setRestLength(doc, 0, 4).error, /notes/);
+});
+
+test("pause en fin de morceau : la barre finale suit", () => {
+  const whole = '<note><rest measure="yes"/><duration>8</duration><voice>1</voice></note>';
+  const doc = score([n("C", 5, 8), whole + '<barline location="right"><bar-style>light-heavy</bar-style></barline>']);
+  setRestLength(doc, 1, 4);
+  const measures = [...doc.getElementsByTagName("measure")];
+  assert.equal(measures.length, 5);
+  assert.deepEqual(measures.map((m) => m.getElementsByTagName("barline").length), [0, 0, 0, 0, 1]);
+  setRestLength(doc, 1, 2);
+  const after = [...doc.getElementsByTagName("measure")];
+  assert.deepEqual(after.map((m) => m.getElementsByTagName("barline").length), [0, 0, 1]);
+});
+
+test("une pause s'arrête à un changement de chiffrage ou à un repère", () => {
+  const whole = '<note><rest measure="yes"/><duration>8</duration><voice>1</voice></note>';
+  const doc = score([whole, whole, whole, whole]);
+  setRehearsal(doc, 2, "A");
+  assert.deepEqual(restRun(analyzeScore(doc), 0), { start: 0, length: 2 });
+  assert.deepEqual(restRun(analyzeScore(doc), 3), { start: 2, length: 2 });
+});
+
+test("pause multiple sans nombre lu (Audiveris met 1) : signalée, puis corrigée", () => {
+  const whole = '<note><rest measure="yes"/><duration>8</duration><voice>1</voice></note>';
+  const doc = score([n("C", 5, 8), '<attributes><measure-style><multiple-rest>1</multiple-rest></measure-style></attributes>' + whole, n("D", 5, 8)]);
+  assert.deepEqual(statuses(doc), ["ok", "count", "ok"]);
+  setRestLength(doc, 1, 3);
+  assert.deepEqual(statuses(doc), ["ok", "ok", "ok", "ok", "ok"]);
+  assert.equal(analyzeScore(doc).measures[1].multiRest, 3);
+});
+
+test("insérer avant une note : sa nuance et son accord chiffré la suivent", () => {
+  const harmony = "<harmony><root><root-step>G</root-step></root><kind>major</kind></harmony>";
+  const doc = score([n("C", 5, 4) + harmony + n("D", 5, 4)]);
+  addAnnotation(doc, { where: "before", index: 1 }, { dynamics: "mf" });
+  insertNote(doc, { where: "before", index: 1 }, { rest: true, type: "quarter" });
+  let a = analyzeScore(doc);
+  assert.deepEqual(summary(doc), ["0:C5/1", "0:r/1", "0:D5/1"]);
+  assert.equal(a.directions[0].start, 2, "mf reste sous Ré, décalé avec lui");
+  const m = doc.getElementsByTagName("measure")[0];
+  const order = [];
+  for (let c = m.firstChild; c; c = c.nextSibling) if (c.nodeType === 1) order.push(c.nodeName);
+  // Do, silence inséré, puis l'accord chiffré et la nuance de Ré, puis Ré.
+  assert.deepEqual(order.slice(1), ["note", "note", "harmony", "direction", "note"]);
+  // Barre après le silence : Ré et sa nuance passent dans la nouvelle mesure.
+  splitMeasureAfter(doc, 1);
+  a = analyzeScore(doc);
+  assert.deepEqual([a.directions[0].measure, a.directions[0].start], [1, 0]);
+  assert.equal(doc.getElementsByTagName("measure")[1].getElementsByTagName("harmony").length, 1);
+});
+
+test("articulations : ajout, retrait, exclusions, accords", () => {
+  const doc = score([n("C", 5, 4) + n("E", 5, 4, "<chord/>") + n("D", 5, 4) + r(4) + n("F", 5, 4)]);
+  const arts = () => analyzeScore(doc).notes.map((x) => x.articulations.join("+") || "-");
+  toggleArticulation(doc, 1, "staccato"); // sur la 2e note de l'accord : notée sur la première
+  assert.deepEqual(arts(), ["staccato", "-", "-", "-", "-"]);
+  toggleArticulation(doc, 0, "tenuto");
+  assert.deepEqual(arts()[0], "staccato+tenuto", "staccato + tenuto (louré) se combinent");
+  toggleArticulation(doc, 0, "staccatissimo");
+  assert.deepEqual(arts()[0], "tenuto+staccatissimo", "staccatissimo remplace staccato");
+  toggleArticulation(doc, 2, "accent");
+  toggleArticulation(doc, 2, "strong-accent");
+  toggleArticulation(doc, 2, "fermata");
+  assert.deepEqual(arts()[2], "strong-accent+fermata");
+  toggleArticulation(doc, 2, "strong-accent");
+  toggleArticulation(doc, 2, "fermata");
+  assert.deepEqual(arts()[2], "-");
+  assert.equal(doc.getElementsByTagName("measure")[0].getElementsByTagName("notations").length, 1, "notations vides retirées");
+  assert.match(toggleArticulation(doc, 3, "staccato").error, /note/);
+  assert.deepEqual(toggleArticulation(doc, 3, "fermata"), {}, "point d'orgue possible sur un silence");
+  const xml = new XMLSerializer().serializeToString(doc);
+  assert.ok(xml.includes('<fermata type="upright"/>'));
+});
+
+test("soufflets : lecture au format d'Audiveris", () => {
+  const wedge = (attrs) => `<direction placement="below"><direction-type><wedge ${attrs}/></direction-type><staff>1</staff></direction>`;
+  const doc = score([
+    n("C", 5, 4) + wedge('type="diminuendo" spread="15" default-x="-2" default-y="-84"') + n("D", 5, 4),
+    n("E", 5, 4) + n("F", 5, 4) + wedge('type="stop" spread="0" default-x="11"'),
+  ]);
+  const a = analyzeScore(doc);
+  assert.equal(a.wedges.length, 1);
+  const w = a.wedges[0];
+  assert.equal(w.type, "diminuendo");
+  assert.deepEqual([w.start.anchor, w.start.dx, w.start.dy, w.start.spread], [1, -2, -84, 15], "début rattaché à Ré");
+  assert.deepEqual([w.stop.measure, w.stop.anchor, w.stop.dx], [1, "end", 11], "fin de mesure");
+});
+
+test("soufflets : ajout, sens, retrait, et les notes insérées ne les cassent pas", () => {
+  const doc = score([n("C", 5, 4) + n("D", 5, 4), n("E", 5, 4) + n("F", 5, 4)]);
+  addWedge(doc, { type: "crescendo", start: { index: 0 }, stop: { index: 3 } });
+  let a = analyzeScore(doc);
+  assert.equal(a.wedges.length, 1);
+  let w = a.wedges[0];
+  assert.deepEqual([w.type, w.start.anchor, w.stop.anchor, w.start.measure, w.stop.measure, w.stop.start], ["crescendo", 0, 3, 0, 1, 1]);
+  assert.equal(w.start.el.getAttribute("number"), "1");
+  assert.equal(w.start.el.hasAttribute("default-x"), false, "pas de décalage : placement d'OSMD");
+  assert.deepEqual(summary(doc), ["0:C5/1", "0:D5/1", "1:E5/1", "1:F5/1"], "les notes ne bougent pas");
+  // Un deuxième soufflet prend un autre numéro.
+  addWedge(doc, { type: "diminuendo", start: { index: 1 }, stop: { part: 0, measure: 1, edge: "end" } });
+  a = analyzeScore(doc);
+  assert.deepEqual(a.wedges.map((x) => [x.type, x.start.number]), [["crescendo", 1], ["diminuendo", 2]]);
+  assert.equal(a.wedges[1].stop.anchor, "end");
+  // Une note insérée avant le début du soufflet : il reste attaché à sa note.
+  insertNote(doc, { where: "before", index: 0 }, { rest: true, type: "quarter" });
+  a = analyzeScore(doc);
+  assert.equal(a.wedges[0].start.anchor, 1, "toujours sous Do (devenu rang 1)");
+  setWedgeType(doc, 0, "diminuendo");
+  assert.equal(analyzeScore(doc).wedges[0].type, "diminuendo");
+  assert.equal(doc.getElementsByTagName("wedge").length, 4);
+  removeWedge(doc, 0);
+  removeWedge(doc, 0);
+  assert.equal(doc.getElementsByTagName("wedge").length, 0);
+  assert.equal(doc.getElementsByTagName("direction").length, 0);
+});
+
+test("nom de l'instrument : renommer, supprimer", () => {
+  const doc = parse(`<?xml version="1.0"?><score-partwise version="4.0"><part-list><score-part id="P1"><part-name>Voice</part-name><part-abbreviation>Voi.</part-abbreviation></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions></attributes></measure></part></score-partwise>`);
+  assert.deepEqual(partNames(doc), [{ id: "P1", name: "Voice", hidden: false }]);
+  setPartName(doc, 0, "Trompette en Si♭");
+  assert.deepEqual(partNames(doc), [{ id: "P1", name: "Trompette en Si♭", hidden: false }]);
+  assert.equal(doc.getElementsByTagName("part-abbreviation").length, 0);
+  setPartName(doc, 0, "  ");
+  assert.deepEqual(partNames(doc), [{ id: "P1", name: "", hidden: true }]);
+  assert.equal(doc.getElementsByTagName("part-name")[0].getAttribute("print-object"), "no");
+  setPartName(doc, 0, "Trompette");
+  assert.equal(doc.getElementsByTagName("part-name")[0].hasAttribute("print-object"), false);
+  assert.match(setPartName(doc, 3, "x").error, /introuvable/);
 });

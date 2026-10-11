@@ -24,7 +24,7 @@
                  accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,.musicxml,.xml,.mxl,application/pdf,image/*">
           <strong>Déposez la partition ici</strong>
           <span>ou cliquez pour choisir un fichier</span>
-          <small>PDF, JPG, PNG (plusieurs pages possibles) ou MusicXML</small>
+          <small>PDF, JPG, PNG (plusieurs pages possibles), MusicXML, ou une relecture enregistrée (.mxl)</small>
         </label>
         <button type="button" class="link" id="sample-btn">Essayer avec un exemple</button>
 
@@ -33,6 +33,11 @@
         <div class="field">
           <label for="title">Morceau</label>
           <input type="text" id="title" placeholder="Titre du morceau">
+        </div>
+        <div class="field" id="part-names" hidden>
+          <label>Nom affiché en début de portée</label>
+          <div id="part-name-fields" class="part-name-fields"></div>
+          <p class="hint">Videz le champ pour ne rien afficher.</p>
         </div>
 
       </section>
@@ -53,17 +58,32 @@
 
       <section class="card actions">
         <button type="button" class="primary" id="print-btn" disabled>🖨️ Imprimer</button>
-        <button type="button" id="download-btn" disabled>⬇️ MusicXML</button>
+        <button type="button" id="save-btn" disabled
+                title="Enregistrer la relecture (partition corrigée + PDF d'origine + réglages) pour la reprendre plus tard">💾 Enregistrer</button>
+        <button type="button" id="download-btn" disabled title="Exporter la partition transposée pour MuseScore…">⬇️ MusicXML</button>
         <button type="button" id="original-btn" disabled>👁️ Original</button>
+        <button type="button" id="layout-btn" title="Disposition des volets original / partition">⇆ Côte à côte</button>
+        <button type="button" id="attach-btn" disabled
+                title="Joindre le PDF ou les images d'origine, pour les afficher à côté et les garder dans la relecture">📎 Joindre l'original</button>
+        <input type="file" id="attach-input" hidden multiple accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,application/pdf,image/*">
         <div class="field zoom">
           <label for="zoom">Zoom</label>
           <input type="range" id="zoom" min="0.5" max="1.6" step="0.05" value="1">
+        </div>
+        <div class="field zoom">
+          <label for="spacing">Espace entre les lignes : <span id="spacing-label">100 %</span></label>
+          <input type="range" id="spacing" min="0" max="1.5" step="0.05" value="1">
+        </div>
+        <label class="check zoom"><input type="checkbox" id="tight-margins"> Marges de page réduites</label>
+        <div class="page-view zoom">
+          <button type="button" id="page-view" aria-pressed="false" disabled
+                  title="Afficher la partition en pages A4, comme à l'impression">📄 Aperçu A4</button>
+          <span id="page-count" class="hint"></span>
         </div>
       </section>
     </aside>
 
     <section class="stage">
-      <div class="original no-print" id="original" hidden></div>
 
       <div class="editor no-print" id="editor" hidden>
         <div class="editor-head">
@@ -109,6 +129,15 @@
               <button type="button" data-action="flat" title="Bémol (B)">♭</button>
               <button type="button" data-action="natural" title="Bécarre (N)">♮</button>
             </div>
+            <div class="tool-group" role="group" aria-label="Articulation">
+              <span class="tool-label">Articulation</span>
+              <button type="button" class="art" data-art="staccato" aria-pressed="false" title="Staccato : note piquée, sèche (S)">· <small>Piqué</small></button>
+              <button type="button" class="art" data-art="tenuto" aria-pressed="false" title="Tenuto : note tenue, non détachée (T)">– <small>Tenuto</small></button>
+              <button type="button" class="art" data-art="accent" aria-pressed="false" title="Accent (A)">&gt; <small>Accent</small></button>
+              <button type="button" class="art" data-art="strong-accent" aria-pressed="false" title="Marcato : accent fort">^ <small>Marcato</small></button>
+              <button type="button" class="art" data-art="staccatissimo" aria-pressed="false" title="Staccatissimo : très piqué">▾ <small>Très piqué</small></button>
+              <button type="button" class="art" data-art="fermata" aria-pressed="false" title="Point d'orgue : note prolongée (F)">𝄐 <small>Point d'orgue</small></button>
+            </div>
             <div class="tool-group" role="group" aria-label="Liaisons">
               <span class="tool-label">Liaison</span>
               <button type="button" data-action="link-left" aria-pressed="false" title="Lier à la note de gauche">⌒ à gauche</button>
@@ -127,7 +156,7 @@
             </div>
           </div>
           <p class="hint editor-keys">Clavier : ← → note précédente/suivante · ↑ ↓ hauteur · 1 à 6 durée · . point ·
-            D / B / N dièse, bémol, bécarre · Suppr · Échap · survolez un espace entre deux notes pour en ajouter une</p>
+            D / B / N dièse, bémol, bécarre · S / T / A / F piqué, tenuto, accent, point d'orgue · Suppr · Échap · survolez un espace entre deux notes pour en ajouter une</p>
         </div>
 
         <div class="mode-panel" data-panel="transpose" hidden>
@@ -168,25 +197,41 @@
                 <option value="flats">Plutôt des ♭</option>
               </select>
             </div>
+            <div class="tp-full tp-apply">
+              <button type="button" class="primary" id="apply-transpose" disabled>✔ Appliquer à la partition</button>
+              <span class="hint" id="apply-hint">Réécrit la sélection transposée, puis remet tonalité et octave à zéro
+                pour transposer une autre partie.</span>
+            </div>
             <div class="summary tp-full" id="summary" hidden></div>
           </div>
           <p class="hint">Cliquez entre deux notes pour placer le début de la sélection, puis la fin (en orange).
-            Tonalité et octave ne changent que la sélection : le reste de la partition n'est pas touché.</p>
+            Tonalité et octave ne changent que la sélection : le reste de la partition n'est pas touché.
+            Commencer une nouvelle sélection applique d'abord le décalage en cours.</p>
         </div>
 
         <div class="mode-panel" data-panel="dynamics" hidden>
           <span>Cliquez sur une note (ou entre deux notes) pour ajouter, changer ou retirer une nuance
             (pp, mf, ff…) ou une indication (cresc., rit.…). Cliquez sur une barre de mesure pour un
-            repère encadré (A, B, C…).</span>
+            repère encadré (A, B, C…). Un soufflet se modifie depuis la note où il commence ou finit.</span>
+          <span class="wedge-tools">
+            <span class="tool-label">Soufflet</span>
+            <button type="button" data-wedge-type="crescendo" aria-pressed="false" title="Crescendo : de plus en plus fort">&lt; Crescendo</button>
+            <button type="button" data-wedge-type="diminuendo" aria-pressed="false" title="Decrescendo : de moins en moins fort">&gt; Decrescendo</button>
+            <span id="wedge-info" class="wedge-info"></span>
+          </span>
         </div>
 
         <div class="mode-panel" data-panel="clef" hidden>
-          <span>Cliquez dans une mesure pour changer la clé, l'armure ou le chiffrage à partir de celle-ci.</span>
+          <span>Cliquez dans une mesure pour changer la clé, l'armure ou le chiffrage à partir de celle-ci,
+            ou le nombre de mesures d'une pause (mesure de silence).</span>
         </div>
       </div>
       <div class="checks no-print" id="checks" hidden></div>
 
       <div class="popup no-print" id="popup" role="dialog" hidden></div>
+      <!-- Deux volets à défilement indépendant : original (PDF, images) et partition retranscrite. -->
+      <div class="views stacked" id="views">
+      <div class="original no-print" id="original" hidden></div>
       <div class="empty no-print" id="empty">
         <p>🎼</p>
         <p>La partition transposée s'affichera ici.</p>
@@ -194,6 +239,7 @@
           manuscrites ou photographiées de travers peuvent contenir des erreurs.</p>
       </div>
       <div id="score" class="score" hidden></div>
+      </div>
     </section>
   </main>
 

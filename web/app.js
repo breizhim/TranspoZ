@@ -13,7 +13,7 @@ import {
   semitoneLabel,
   UNISON,
 } from "./transpose.js";
-import { readMusicXML, isMusicXMLName } from "./mxl.js";
+import { readScoreFile, writeScoreFile, isMusicXMLName } from "./mxl.js";
 import { TrumpetPlayer } from "./player.js";
 import * as editor from "./editor.js";
 
@@ -37,8 +37,20 @@ const ui = {
   summary: $("summary"),
   printBtn: $("print-btn"),
   downloadBtn: $("download-btn"),
+  saveBtn: $("save-btn"),
+  attachBtn: $("attach-btn"),
+  attachInput: $("attach-input"),
   originalBtn: $("original-btn"),
+  layoutBtn: $("layout-btn"),
+  views: $("views"),
   zoom: $("zoom"),
+  partNames: $("part-names"),
+  partNameFields: $("part-name-fields"),
+  spacing: $("spacing"),
+  spacingLabel: $("spacing-label"),
+  tightMargins: $("tight-margins"),
+  pageViewBtn: $("page-view"),
+  pageCount: $("page-count"),
   playBtn: $("play-btn"),
   stopBtn: $("stop-btn"),
   tempo: $("tempo"),
@@ -56,7 +68,10 @@ const ui = {
   playInfo: $("play-info"),
   playFromStart: $("play-from-start"),
   regionInfo: $("region-info"),
+  wedgeButtons: [...document.querySelectorAll("[data-wedge-type]")],
+  wedgeInfo: $("wedge-info"),
   selectAll: $("select-all"),
+  applyTranspose: $("apply-transpose"),
   selectNone: $("select-none"),
   original: $("original"),
   empty: $("empty"),
@@ -86,6 +101,7 @@ const state = {
   slots: null, // emplacements entre les notes (calculés au premier survol)
   hoverSlot: null,
   mode: "play", // play | notes | transpose | dynamics | clef
+  wedgePlacing: null, // soufflet en cours de placement : { type, start: null | { anchor, slot, x } }
   // Sélection à transposer : "all" (toute la partition), null (rien) ou
   // { start, end } en { measure, offset } (end null pendant le choix de la fin).
   region: "all",
@@ -127,7 +143,45 @@ async function getOSMD() {
     followCursor: true,
   });
   state.osmd.EngravingRules.RehearsalMarkFontSize = 14; // repères A, B… lisibles de loin
+  applyLayoutRules(state.osmd);
   return state.osmd;
+}
+
+// Espacement vertical (lignes de la partition, portées) et marges de page.
+// Les valeurs d'OSMD par défaut sont multipliées par le réglage « Espace entre les lignes ».
+const LAYOUT_DEFAULTS = {
+  MinimumDistanceBetweenSystems: 7,
+  MinSkyBottomDistBetweenSystems: 5,
+  StaffDistance: 7,
+  BetweenStaffDistance: 5,
+  MinSkyBottomDistBetweenStaves: 1,
+};
+
+function applyLayoutRules(osmd) {
+  const rules = osmd.EngravingRules;
+  const factor = Number(ui.spacing.value);
+  for (const [name, value] of Object.entries(LAYOUT_DEFAULTS)) rules[name] = value * factor;
+  const margin = ui.tightMargins.checked ? 1.5 : 5;
+  for (const name of ["PageTopMargin", "PageBottomMargin", "PageLeftMargin", "PageRightMargin"]) rules[name] = margin;
+  rules.TitleTopDistance = ui.tightMargins.checked ? 1.5 : 5;
+  ui.spacingLabel.textContent = `${Math.round(factor * 100)} %`;
+}
+
+function updatePageCount() {
+  const pages = state.osmd?.GraphicSheet?.MusicPages.length ?? 0;
+  ui.pageCount.textContent = state.pageFormat === "Endless" || !pages ? "" : `${pages} page${pages > 1 ? "s" : ""} A4`;
+}
+
+// Nouveau rendu (même partition), en gardant la position de défilement.
+function relayout() {
+  if (!state.osmd || !state.sourceXml || state.rendering) return;
+  const scroll = scrollPosition();
+  applyLayoutRules(state.osmd);
+  state.osmd.render();
+  decorate();
+  restoreScroll(scroll, { proportional: true });
+  if (state.cursorTimes) state.osmd.cursor?.update();
+  updatePageCount();
 }
 
 // Décalage choisi pour la sélection : tonalité (demi-tons) + octave.
@@ -187,6 +241,40 @@ function transpose() {
   return new XMLSerializer().serializeToString(doc);
 }
 
+// Noms des instruments (début de portée), modifiables ; un nom vide n'est pas affiché.
+function showPartNames() {
+  const doc = new DOMParser().parseFromString(state.sourceXml, "application/xml");
+  const parts = editor.partNames(doc);
+  ui.partNames.hidden = parts.length === 0;
+  const inputs = [...ui.partNameFields.querySelectorAll("input")];
+  if (inputs.length !== parts.length) {
+    ui.partNameFields.replaceChildren(...parts.map((p, i) => h("input", {
+      type: "text",
+      placeholder: "(aucun nom affiché)",
+      "aria-label": parts.length > 1 ? `Nom de l'instrument ${i + 1}` : "Nom de l'instrument",
+      onchange: (e) => apply((d) => editor.setPartName(d, i, e.target.value)),
+    })));
+  }
+  ui.partNameFields.querySelectorAll("input").forEach((input, i) => {
+    if (document.activeElement !== input) input.value = parts[i].hidden ? "" : parts[i].name;
+  });
+}
+
+// Position de défilement de la partition (volet et page), à garder pendant un
+// nouveau rendu : OSMD vide le volet avant de le redessiner, ce qui ramènerait
+// l'ascenseur en haut à chaque modification.
+function scrollPosition() {
+  const s = ui.score;
+  return { top: s.scrollTop, left: s.scrollLeft, height: s.scrollHeight, width: s.scrollWidth, page: window.scrollY };
+}
+
+function restoreScroll(pos, { proportional = false } = {}) {
+  const s = ui.score;
+  s.scrollTop = proportional && pos.height ? (pos.top * s.scrollHeight) / pos.height : pos.top;
+  s.scrollLeft = proportional && pos.width ? (pos.left * s.scrollWidth) / pos.width : pos.left;
+  if (window.scrollY !== pos.page) window.scrollTo(window.scrollX, pos.page);
+}
+
 // Un seul rendu à la fois : les changements rapides sont regroupés.
 async function update() {
   ui.semiLabel.textContent = semitoneLabel(Number(ui.semitones.value));
@@ -197,6 +285,7 @@ async function update() {
     return;
   }
   state.rendering = true;
+  const scroll = scrollPosition();
   try {
     do {
       state.dirty = false;
@@ -206,10 +295,14 @@ async function update() {
       const osmd = await getOSMD();
       await osmd.load(state.transposedXml);
       osmd.zoom = Number(ui.zoom.value);
+      applyLayoutRules(osmd);
       osmd.render();
       decorate();
+      restoreScroll(scroll);
     } while (state.dirty);
-    for (const b of [ui.printBtn, ui.downloadBtn, ui.playBtn, ui.stopBtn]) b.disabled = false;
+    for (const b of [ui.printBtn, ui.downloadBtn, ui.saveBtn, ui.attachBtn, ui.playBtn, ui.stopBtn, ui.pageViewBtn]) b.disabled = false;
+    showPartNames();
+    updatePageCount();
     ui.editor.hidden = false;
   } catch (err) {
     console.error(err);
@@ -231,8 +324,8 @@ function setStatus(text, kind = "") {
 function showOriginals(files) {
   for (const o of state.originals) URL.revokeObjectURL(o.url);
   state.originals = files
-    .filter((f) => f.type === "application/pdf" || f.type.startsWith("image/") || /\.(pdf|jpe?g|png)$/i.test(f.name))
-    .map((f) => ({ url: URL.createObjectURL(f), pdf: f.type === "application/pdf" || /\.pdf$/i.test(f.name) }));
+    .filter((f) => f.type === "application/pdf" || f.type.startsWith("image/") || /\.(pdf|jpe?g|png|tiff?)$/i.test(f.name))
+    .map((f) => ({ file: f, url: URL.createObjectURL(f), pdf: f.type === "application/pdf" || /\.pdf$/i.test(f.name) }));
   ui.original.replaceChildren(
     ...state.originals.map((o) => {
       if (o.pdf) {
@@ -265,6 +358,7 @@ function resetForNewScore() {
   state.hoverSlot = null;
   state.noteEls = new Map();
   state.analysis = null;
+  ui.score.scrollTop = 0; // nouvelle partition : on repart du début
   ui.semitones.value = "0";
   ui.octave.value = "0";
   ui.keyPref.value = "auto";
@@ -308,29 +402,61 @@ async function recognizeOnServer(files) {
   return body;
 }
 
+const MIME_TYPES = { pdf: "application/pdf", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", tif: "image/tiff", tiff: "image/tiff" };
+const mimeOf = (name) => MIME_TYPES[/\.([^.]+)$/.exec(name)?.[1].toLowerCase()] ?? "application/octet-stream";
+
+// MusicXML ou fichier de relecture (.mxl), lu dans le navigateur ; les PDF/images
+// déposés avec lui deviennent l'original à comparer.
+async function openScoreFile(file, others) {
+  const fallbackTitle = file.name.replace(/\.[^.]+$/, "").replace(/ - relecture$/, "").replace(/[_-]+/g, " ");
+  const { xml, originals, session } = await readScoreFile(new Uint8Array(await file.arrayBuffer()));
+  const attached = originals.map((o) => new File([o.bytes], o.name, { type: mimeOf(o.name) }));
+  showOriginals([...attached, ...others]);
+  await loadSource(xml, session?.title ?? null, fallbackTitle);
+  if (session) await restoreSession(session);
+  if (state.originals.length) ui.original.hidden = false;
+  const names = state.originals.map((o) => o.file.name).join(", ");
+  if (attached.length) setStatus(`Relecture reprise : partition corrigée, réglages et original (${names}) rechargés.`);
+  else if (state.originals.length) setStatus(`Partition chargée avec son original (${names}).`);
+  else setStatus("Partition chargée. Pour la relire à côté de l'original, utilisez « 📎 Joindre l'original ».");
+}
+
+// PDF ou images d'origine ajoutés après coup (partition déjà ouverte, sans original).
+function attachOriginals(fileList) {
+  const files = [...fileList].filter((f) => !isMusicXMLName(f.name));
+  ui.attachInput.value = "";
+  if (!files.length) return;
+  showOriginals(files);
+  if (!state.originals.length) {
+    setStatus("Choisissez un PDF ou des images (JPG, PNG, TIFF).", "error");
+    return;
+  }
+  ui.original.hidden = false;
+  setStatus(`Original joint : ${state.originals.map((o) => o.file.name).join(", ")}. Il sera gardé dans la relecture enregistrée (💾).`);
+}
+
 async function handleFiles(fileList) {
   const files = [...fileList];
   if (!files.length) return;
   closePopup();
   pausePlayback();
-  showOriginals(files);
-  const needsOMR = files.some((f) => !isMusicXMLName(f.name));
+  const scores = files.filter((f) => isMusicXMLName(f.name));
+  const others = files.filter((f) => !isMusicXMLName(f.name));
   setStatus(
-    needsOMR
-      ? `Reconnaissance des notes en cours (${files.length} fichier${files.length > 1 ? "s" : ""})… cela peut prendre une minute par page.`
-      : "Lecture de la partition…",
+    scores.length
+      ? "Lecture de la partition…"
+      : `Reconnaissance des notes en cours (${files.length} fichier${files.length > 1 ? "s" : ""})… cela peut prendre une minute par page.`,
     "busy",
   );
   ui.dropzone.classList.add("busy");
   try {
-    const fallbackTitle = files[0].name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
-    if (!needsOMR && files.length === 1) {
-      // MusicXML : lu directement dans le navigateur, sans serveur.
-      const xml = await readMusicXML(new Uint8Array(await files[0].arrayBuffer()));
-      await loadSource(xml, null, fallbackTitle);
-      setStatus("Partition chargée.");
+    if (scores.length > 1) throw new Error("Une seule partition MusicXML à la fois (avec, si besoin, son PDF ou ses images).");
+    if (scores.length === 1) {
+      await openScoreFile(scores[0], others);
       return;
     }
+    showOriginals(files);
+    const fallbackTitle = files[0].name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
     if (!(server ?? (await checkServer())).reachable) throw new Error(NO_OMR_MESSAGE);
     const body = await recognizeOnServer(files);
     await loadSource(body.musicxml, body.title, fallbackTitle);
@@ -492,6 +618,7 @@ const TYPE_FR = {
   breve: "carrée", whole: "ronde", half: "blanche", quarter: "noire", eighth: "croche",
   "16th": "double croche", "32nd": "triple croche", "64th": "quadruple croche",
 };
+const ARTICULATION_KEYS = { s: "staccato", t: "tenuto", a: "accent", f: "fermata" };
 const DURATION_KEYS = { 1: "whole", 2: "half", 3: "quarter", 4: "eighth", 5: "16th", 6: "32nd" };
 
 const pitchLabel = (p) => `${NOTE_FR[p.step]}${ALTER_FR[p.alter] ?? ""}${p.octave}`;
@@ -552,11 +679,16 @@ function mapGraphicalNotes(osmd, analysis) {
   return map;
 }
 
+// Coordonnées internes des SVG d'OSMD : 10 par unité OSMD, quel que soit le zoom
+// (OSMD zoome en changeant la taille d'affichage du SVG, pas ses coordonnées).
+// À l'écran, une unité OSMD vaut 10 × zoom pixels.
+const SVG_UNIT = 10;
+
 // Cadres rouges sur les mesures dont la durée ne correspond pas au chiffrage.
 function drawMeasureChecks(osmd, analysis) {
   for (const old of ui.score.querySelectorAll(".tz-flag")) old.remove();
   const svgs = ui.score.querySelectorAll("svg");
-  const unit = 10 * osmd.zoom;
+  const unit = SVG_UNIT;
   const flagged = analysis.measures.filter((m) => m.status !== "ok");
   for (const m of flagged) {
     const row = osmd.GraphicSheet.MeasureList[m.index];
@@ -581,29 +713,41 @@ function drawMeasureChecks(osmd, analysis) {
     rect.setAttribute("height", (y2 - y1) * unit);
     rect.setAttribute("rx", 4);
     const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-    title.textContent = `Mesure ${m.number} : ${beatsLabel(m.actual, m.time)} temps au lieu de ${m.time.beats}`;
+    title.textContent = m.status === "count"
+      ? `Mesure ${m.number} : pause de plusieurs mesures dont le nombre n'a pas été lu`
+      : `Mesure ${m.number} : ${beatsLabel(m.actual, m.time)} temps au lieu de ${m.time.beats}`;
     rect.appendChild(title);
     svg.insertBefore(rect, svg.firstChild);
   }
 
+  const durations = flagged.filter((m) => m.status !== "count");
+  const counts = flagged.filter((m) => m.status === "count");
   ui.checks.hidden = flagged.length === 0;
   if (!flagged.length) return;
-  const label = flagged.length > 1 ? `${flagged.length} mesures à vérifier` : "1 mesure à vérifier";
-  ui.checks.replaceChildren(
-    document.createTextNode(`⚠️ ${label} (durée différente du chiffrage) : `),
-    ...flagged.slice(0, 30).map((m) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.textContent = m.number;
-      b.title = `${beatsLabel(m.actual, m.time)} temps au lieu de ${m.time.beats} (${m.status === "short" ? "incomplète" : "trop longue"})`;
-      b.addEventListener("click", () => {
-        const note = analysis.notes.find((n) => n.part === m.part && n.measure === m.index);
-        if (note) select(note.index, { scroll: true });
-      });
-      return b;
-    }),
-    document.createTextNode(flagged.length > 30 ? " …" : ""),
-  );
+  const numberButton = (m, title, onclick) => h("button", { type: "button", title, onclick }, m.number);
+  ui.checks.replaceChildren(...nodes([
+    durations.length
+      ? h("div", {},
+        `⚠️ ${durations.length > 1 ? `${durations.length} mesures à vérifier` : "1 mesure à vérifier"} (durée différente du chiffrage) : `,
+        durations.slice(0, 30).map((m) => numberButton(m,
+          `${beatsLabel(m.actual, m.time)} temps au lieu de ${m.time.beats} (${m.status === "short" ? "incomplète" : "trop longue"})`,
+          () => {
+            const note = analysis.notes.find((n) => n.part === m.part && n.measure === m.index);
+            if (!note) return;
+            setMode("notes");
+            select(note.index, { scroll: true });
+          })),
+        durations.length > 30 ? " …" : "")
+      : null,
+    counts.length
+      ? h("div", {},
+        "⚠️ Pause de plusieurs mesures dont le nombre n'a pas été lu (indiquez-le) : ",
+        counts.map((m) => numberButton(m, "Indiquer le nombre de mesures de la pause", (e) => {
+          setMode("clef");
+          openMeasurePopup(e, { part: m.part, measure: m.index, staff: analysis.staffOffsets[m.part] });
+        })))
+      : null,
+  ]));
 }
 
 // Après chaque rendu : notes cliquables, mesures signalées, sélection.
@@ -665,6 +809,14 @@ function showSelection() {
   }
   for (const name of ["up", "down", "octave-up", "octave-down", "sharp", "flat", "natural", "link-left", "link-right"]) {
     ui.editorTools.querySelector(`[data-action="${name}"]`).disabled = n.rest;
+  }
+  // Articulations de la note (ou de son accord).
+  const chord = state.analysis.notes.filter((x) => x.part === n.part && x.measure === n.measure && x.staff === n.staff &&
+    x.voice === n.voice && !x.grace && Math.abs(x.start - n.start) < 1e-6);
+  const articulations = new Set(chord.flatMap((x) => x.articulations));
+  for (const b of ui.editorTools.querySelectorAll("[data-art]")) {
+    b.setAttribute("aria-pressed", String(articulations.has(b.dataset.art)));
+    b.disabled = n.rest && b.dataset.art !== "fermata";
   }
   ui.editorTools.querySelector('[data-action="to-note"]').disabled = !n.rest;
 }
@@ -770,6 +922,11 @@ const ACTIONS = {
 };
 
 function handleEditorKey(e) {
+  if (state.wedgePlacing && e.key === "Escape") {
+    setWedgePlacing(null);
+    e.preventDefault();
+    return;
+  }
   if (!ui.popup.hidden) {
     if (e.key === "Escape") {
       closePopup();
@@ -808,6 +965,8 @@ function handleEditorKey(e) {
     ACTIONS.flat();
   } else if (!ctrl && (key === "n" || key === "N")) {
     ACTIONS.natural();
+  } else if (!ctrl && ARTICULATION_KEYS[key.toLowerCase()]) {
+    edit((doc, i) => editor.toggleArticulation(doc, i, ARTICULATION_KEYS[key.toLowerCase()]));
   } else if (key === "Escape") {
     select(null);
   } else {
@@ -892,6 +1051,7 @@ function computeSlots() {
         });
         continue;
       }
+      const before = slots.length;
       for (const events of voices.values()) {
         const extents = events.map((ev) => {
           const boxes = ev.map((n) => noteExtent(n.index)).filter(Boolean);
@@ -930,6 +1090,15 @@ function computeSlots() {
           });
         }
       }
+      // Rien de dessiné note par note (pause de plusieurs mesures) : la mesure reste
+      // cliquable dans son ensemble (Clé & mesure, repères), sans insertion possible.
+      if (slots.length === before) {
+        slots.push({
+          ...base, x1: mLeft, x2: mRight, x: mLeft + (mRight - mLeft) / 2, measureOnly: true,
+          clef: m.clefs.get(localStaff) ?? null, before: Infinity,
+          target: { where: "end", part: m.part, measure: m.index, staff: localStaff },
+        });
+      }
     }
   }
   return slots;
@@ -955,6 +1124,7 @@ function findSlot(x, y) {
   let best = null;
   for (const s of state.slots) {
     const margin = 3 * s.unit;
+    if (s.measureOnly) continue;
     if (y < s.top - margin || y > s.bottom + margin || x < s.x1 - 2 || x > s.x2 + 2) continue;
     if (!best || Math.abs(x - s.x) < Math.abs(x - best.x)) best = s;
   }
@@ -966,13 +1136,13 @@ let insertLabel = null;
 
 const HOVER_LABELS = { play: "▶", transpose: "⇆", dynamics: "mf" };
 
-function showInsertLine(slot, pitch, { barline = false } = {}) {
+function showInsertLine(slot, pitch, { barline = false, kind: forcedKind = null, label = null } = {}) {
   if (!insertLine?.isConnected) {
     insertLine = document.createElement("div");
     insertLabel = document.createElement("div");
     ui.score.append(insertLine, insertLabel);
   }
-  const kind = barline ? "rehearsal" : state.mode;
+  const kind = forcedKind ?? (barline ? "rehearsal" : state.mode);
   insertLine.className = `insert-line no-print mode-${kind}`;
   insertLabel.className = `insert-label no-print mode-${kind}`;
   const pad = slot.unit;
@@ -985,8 +1155,8 @@ function showInsertLine(slot, pitch, { barline = false } = {}) {
     top: `${slot.top - pad}px`,
     height: `${slot.bottom - slot.top + 2 * pad}px`,
   });
-  insertLabel.textContent = barline ? "□ repère"
-    : state.mode === "notes" ? (pitch ? `+ ${pitchLabel(pitch)}` : "+") : HOVER_LABELS[state.mode] ?? "";
+  insertLabel.textContent = label ?? (barline ? "□ repère"
+    : state.mode === "notes" ? (pitch ? `+ ${pitchLabel(pitch)}` : "+") : HOVER_LABELS[state.mode] ?? "");
   Object.assign(insertLabel.style, {
     display: insertLabel.textContent ? "block" : "none", left: `${x}px`, top: `${slot.top - pad - 2}px`,
   });
@@ -1047,8 +1217,29 @@ function intervalAt(part, pos) {
   return inRegion(pos) ? p.regionInterval : p.interval;
 }
 
+// Décalage en attente : tonalité ou octave non nulles sur une sélection non vide.
+function pendingShift() {
+  const r = state.region;
+  return Boolean(selectionShift().chromatic) && (r === "all" || Boolean(r?.end));
+}
+
+// Réécrit la partition avec la sélection transposée, puis repart de zéro pour une autre sélection.
+function applyTransposition({ automatic = false } = {}) {
+  if (!pendingShift() || !state.transposedXml || state.rendering || state.dirty) return false;
+  const label = state.region === "all" ? "toute la partition" : regionLabel(state.region);
+  const shift = semitoneLabel(selectionShift().chromatic);
+  const xml = state.transposedXml;
+  ui.semitones.value = "0";
+  ui.octave.value = "0";
+  state.region = null;
+  commit(xml, state.selected);
+  setStatus(`${automatic ? "Décalage précédent appliqué" : "Appliqué"} : ${shift} sur ${label}.${automatic ? "" : " Choisissez une autre sélection."}`);
+  return true;
+}
+
 function updateRegionInfo() {
   const r = state.region;
+  ui.applyTranspose.disabled = !pendingShift();
   ui.selectAll.disabled = r === "all";
   ui.selectNone.disabled = r === null;
   if (r === "all") ui.regionInfo.textContent = "Toute la partition est sélectionnée.";
@@ -1063,6 +1254,8 @@ function setRegion(region) {
 }
 
 function setRegionBoundary(pos) {
+  // Nouvelle sélection : le décalage de la précédente est d'abord appliqué.
+  if (state.region === "all" || state.region?.end) applyTransposition({ automatic: true });
   const r = state.region;
   if (!r || r === "all" || r.end) state.region = { start: pos, end: null };
   else {
@@ -1078,7 +1271,7 @@ function measureColumn(index) {
   const osmd = state.osmd;
   const row = (osmd.GraphicSheet.MeasureList[index] ?? []).filter((gm) => gm?.PositionAndShape);
   if (!row.length) return null;
-  const unit = 10 * osmd.zoom;
+  const unit = SVG_UNIT;
   const first = row[0].PositionAndShape;
   const last = row[row.length - 1].PositionAndShape;
   const page = row[0].ParentStaffLine?.ParentMusicSystem?.Parent;
@@ -1103,7 +1296,8 @@ function positionX(pos, column) {
   if (!later.length) return column.right;
   const first = Math.min(...later.map((n) => n.start));
   const lefts = later.filter((n) => Math.abs(n.start - first) < 1e-6).map((n) => noteExtent(n.index)?.left).filter((x) => x != null);
-  return lefts.length ? Math.min(...lefts) - origin.left - 0.6 * column.unit : column.right;
+  // Position écran → coordonnées du SVG (divisées par le zoom).
+  return lefts.length ? (Math.min(...lefts) - origin.left) / state.osmd.zoom - 0.6 * column.unit : column.right;
 }
 
 function svgRect(svg, cls, x, y, width, height, title) {
@@ -1162,6 +1356,7 @@ function setMode(mode) {
   ui.score.classList.add(`tz-mode-${mode}`);
   closePopup();
   hideInsertLine();
+  setWedgePlacing(null);
   if (mode !== "notes" && state.selected != null) select(null);
   updateRegionInfo();
   drawRegion();
@@ -1169,6 +1364,10 @@ function setMode(mode) {
 
 function onScoreMove(e) {
   if (!ui.popup.hidden || state.rendering || !state.analysis) return;
+  if (state.mode === "dynamics" && state.wedgePlacing) {
+    wedgeHover(e);
+    return;
+  }
   const onNote = e.target.closest?.("[data-note]");
   if (onNote && state.mode !== "clef") {
     hideInsertLine();
@@ -1176,7 +1375,9 @@ function onScoreMove(e) {
   }
   const p = scoreBox({ left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY });
   const barline = state.mode === "dynamics" ? findBarline(p.left, p.top) : null;
-  const slot = barline ?? (state.mode === "clef" ? findMeasure(p.left, p.top) : findSlot(p.left, p.top));
+  const slot = barline ?? (state.mode === "clef" ? findMeasure(p.left, p.top) : findSlot(p.left, p.top)) ??
+    // Pause de plusieurs mesures : on peut y démarrer la lecture ou y poser une borne.
+    (["play", "transpose"].includes(state.mode) ? findMeasure(p.left, p.top, { measureOnly: true }) : null);
   if (!slot) {
     hideInsertLine();
     return;
@@ -1198,12 +1399,18 @@ function findBarline(x, y) {
   return best;
 }
 
-function findMeasure(x, y) {
+function findMeasure(x, y, { measureOnly = false } = {}) {
   state.slots ??= computeSlots();
-  return state.slots.find((s) => y >= s.top - 3 * s.unit && y <= s.bottom + 3 * s.unit && x >= s.mLeft && x <= s.mRight) ?? null;
+  return state.slots.find((s) => (!measureOnly || s.measureOnly) &&
+    y >= s.top - 3 * s.unit && y <= s.bottom + 3 * s.unit && x >= s.mLeft && x <= s.mRight) ?? null;
 }
 
 function onScoreClick(e) {
+  if (state.mode === "dynamics" && state.wedgePlacing) {
+    wedgeClick();
+    return;
+  }
+
   const el = e.target.closest?.("[data-note]");
   const note = el ? state.analysis?.notes[Number(el.getAttribute("data-note"))] : null;
   const slot = state.hoverSlot?.slot;
@@ -1230,6 +1437,71 @@ function onScoreClick(e) {
       openMeasurePopup(e, note ? { part: note.part, measure: note.measure, staff: note.staff } : slot);
       break;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Soufflets (crescendo <, decrescendo >), dessinés par OSMD : début et fin
+// placés entre deux notes (avant une note ou en fin de mesure).
+// ---------------------------------------------------------------------------
+
+const WEDGE_NAMES = { crescendo: "Crescendo", diminuendo: "Decrescendo" };
+
+function setWedgePlacing(placing) {
+  state.wedgePlacing = placing;
+  for (const b of ui.wedgeButtons) b.setAttribute("aria-pressed", String(placing?.type === b.dataset.wedgeType));
+  ui.wedgeInfo.textContent = !placing ? ""
+    : !placing.start ? `${WEDGE_NAMES[placing.type]} : cliquez entre deux notes là où il commence (Échap pour annuler).`
+      : "Cliquez là où il se termine.";
+  if (!placing?.start) document.querySelector(".wedge-mark")?.remove();
+  hideInsertLine();
+}
+
+// Extrémité d'un soufflet pour un emplacement : avant une note, ou fin de mesure.
+function wedgeAnchor(slot) {
+  const t = slot.target;
+  if (t.where === "before") return { index: t.index };
+  const localStaff = slot.staff - state.analysis.staffOffsets[slot.part] + 1;
+  return { part: slot.part, measure: slot.measure, staff: localStaff, edge: "end" };
+}
+
+function wedgeHover(e) {
+  const p = scoreBox({ left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY });
+  const start = state.wedgePlacing.start;
+  const slot = findSlot(p.left, p.top);
+  if (!slot || (start && slot.staff !== start.slot.staff)) {
+    hideInsertLine();
+    return;
+  }
+  state.hoverSlot = { slot };
+  showInsertLine(slot, null, { kind: "wedge", label: start ? "fin" : "début" });
+}
+
+function wedgeClick() {
+  const slot = state.hoverSlot?.slot;
+  const placing = state.wedgePlacing;
+  if (!slot) return;
+  const here = { slot, pos: slotPosition(slot) };
+  if (!placing.start) {
+    placing.start = here;
+    const mark = document.createElement("div");
+    mark.className = "wedge-mark no-print";
+    Object.assign(mark.style, {
+      left: `${slot.x}px`, top: `${slot.top - slot.unit}px`, height: `${slot.bottom - slot.top + 2 * slot.unit}px`,
+    });
+    document.querySelector(".wedge-mark")?.remove();
+    ui.score.appendChild(mark);
+    setWedgePlacing(placing);
+    return;
+  }
+  const order = comparePosition(here.pos, placing.start.pos);
+  if (order === 0) return;
+  const [a, b] = order > 0 ? [placing.start, here] : [here, placing.start];
+  const type = placing.type;
+  setWedgePlacing(null);
+  apply((doc) => editor.addWedge(doc, {
+    type, start: wedgeAnchor(a.slot), stop: wedgeAnchor(b.slot),
+    localStaff: a.slot.staff - state.analysis.staffOffsets[a.slot.part] + 1,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1320,6 +1592,8 @@ function openDynamicsPopup(e, target, note) {
     where = { part: n.part, measure: n.measure, start: target.where === "before" ? n.start : n.start + n.duration };
   }
   const existing = editor.annotationsAt(state.analysis, where);
+  const sameSpot = (mark) => mark.part === where.part && mark.measure === where.measure && Math.abs(mark.start - where.start) < 1e-6;
+  const wedges = state.analysis.wedges.filter((w) => sameSpot(w.start) || sameSpot(w.stop));
   const add = (what) => {
     closePopup();
     apply((doc) => editor.addAnnotation(doc, target, what));
@@ -1337,6 +1611,28 @@ function openDynamicsPopup(e, target, note) {
             apply((doc) => editor.removeAnnotation(doc, d.index));
           },
         }, "✕"))))
+      : null,
+    wedges.length
+      ? h("div", { class: "row" }, wedges.map((w) => {
+        const other = w.type === "crescendo" ? "diminuendo" : "crescendo";
+        const to = measureOf(w.part, w.stop.measure)?.number;
+        const from = measureOf(w.part, w.start.measure)?.number;
+        return h("span", { class: "chip" }, `${w.type === "crescendo" ? "<" : ">"} ${WEDGE_NAMES[w.type]} (mes. ${from} → ${to})`,
+          h("button", {
+            type: "button", title: `Changer en ${WEDGE_NAMES[other].toLowerCase()}`,
+            onclick: () => {
+              closePopup();
+              apply((doc) => editor.setWedgeType(doc, w.index, other));
+            },
+          }, "⇄"),
+          h("button", {
+            type: "button", title: "Supprimer le soufflet",
+            onclick: () => {
+              closePopup();
+              apply((doc) => editor.removeWedge(doc, w.index));
+            },
+          }, "✕"));
+      }))
       : null,
     h("div", { class: "row" }, editor.DYNAMICS.map((d) => h("button", { type: "button", class: "dyn", onclick: () => add({ dynamics: d }) }, d))),
     h("div", { class: "row" }, WORDS.map((w) => h("button", { type: "button", onclick: () => add({ words: w }) }, w))),
@@ -1423,13 +1719,17 @@ function openMeasurePopup(e, where) {
   const timeValue = m.time ? `${m.time.beats}/${m.time.beatType}` : "4/4";
   const timeSelect = h("select", {}, [...new Set([timeValue, ...TIME_CHOICES])].map((t) =>
     h("option", { value: t, selected: t === timeValue }, t)));
+  // Mesure de silence : nombre de mesures de la pause (affiché au-dessus).
+  const run = editor.restRun(state.analysis, m.index);
+  const restInput = run ? h("input", { type: "number", min: 1, max: 999, value: run.length, size: 4 }) : null;
 
   const submit = () => {
     const newClef = clefSelect.value !== clefKey ? CLEFS[clefSelect.value] : null;
     const shown = Number(keySelect.value);
     const newTime = timeSelect.value !== timeValue ? timeSelect.value.split("/").map(Number) : null;
+    const restLength = restInput && Number(restInput.value) !== run.length ? Number(restInput.value) : null;
     closePopup();
-    if (!newClef && shown === m.fifths && !newTime) return;
+    if (!newClef && shown === m.fifths && !newTime && !restLength) return;
     // Armure choisie sur la partition affichée → armure d'origine.
     let fifths = shown - intervalFifths(intervalAt(m.part, { measure: m.index, offset: 0 }));
     while (fifths > 7) fifths -= 12;
@@ -1443,6 +1743,8 @@ function openMeasurePopup(e, where) {
         editor.setClefAt(doc, m.part, m.index, localStaff, { sign: newClef.sign, line: newClef.line, octaveChange: newClef.octave });
       }
       if (newTime) editor.setTimeAt(doc, m.index, newTime[0], newTime[1]);
+      // En dernier : peut ajouter ou retirer des mesures après celle-ci.
+      if (restLength) return editor.setRestLength(doc, m.index, restLength);
       return {};
     });
   };
@@ -1458,23 +1760,34 @@ function openMeasurePopup(e, where) {
   h("div", { class: "field-line" }, "Armure", keySelect),
   h("label", {}, applyToNotes, "Appliquer l'armure aux notes (corrige la reconnaissance)"),
   h("div", { class: "field-line" }, "Chiffrage", timeSelect),
+  run ? h("div", { class: "field-line" }, "Pause", h("span", { class: "row" }, restInput, `mesure${run.length > 1 ? "s" : ""} de silence`)) : null,
+  run ? h("div", { class: "muted" }, run.length > 1
+    ? `Pause des mesures ${measureOf(0, run.start)?.number} à ${measureOf(0, run.start + run.length - 1)?.number}.`
+    : "Une seule mesure : indiquez le nombre de mesures d'attente (ex. 8) pour les recréer.") : null,
   h("div", { class: "row" },
     h("button", { type: "submit", class: "primary" }, "Appliquer"),
     h("button", { type: "button", onclick: closePopup }, "Annuler")),
   ));
 }
 
-// Redimensionnement de la fenêtre : nouveau rendu, puis décorations.
+// La largeur de la partition change (fenêtre, original affiché ou masqué) :
+// nouveau rendu à la nouvelle largeur, puis décorations.
 let resizeTimer;
-window.addEventListener("resize", () => {
+let scoreWidth = 0;
+new ResizeObserver(() => {
+  const width = ui.score.clientWidth;
+  if (!width || Math.abs(width - scoreWidth) < 2) return;
+  scoreWidth = width;
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(() => {
     if (!state.osmd || !state.sourceXml || state.rendering || state.pageFormat !== "Endless") return;
+    const scroll = scrollPosition();
     state.osmd.render();
     decorate();
+    restoreScroll(scroll, { proportional: true });
     if (state.cursorTimes) state.osmd.cursor?.update();
-  }, 250);
-});
+  }, 200);
+}).observe(ui.score);
 
 // ---------------------------------------------------------------------------
 // Impression et export
@@ -1484,33 +1797,107 @@ async function renderWithFormat(format) {
   state.pageFormat = format;
   const osmd = await getOSMD();
   osmd.setOptions({ pageFormat: format });
+  applyLayoutRules(osmd);
   osmd.render();
-  if (format === "Endless") decorate();
-  else alignRehearsalMarks(); // aussi pour l'impression
+  ui.score.classList.toggle("page-view", format !== "Endless");
+  decorate();
+  updatePageCount();
+}
+
+// Aperçu A4 : la partition telle qu'elle sera imprimée (pages), toujours modifiable.
+async function setPageView(on) {
+  ui.pageViewBtn.setAttribute("aria-pressed", String(on));
+  if (!state.sourceXml) return;
+  const scroll = scrollPosition();
+  hideCursor();
+  state.cursorTimes = null;
+  await renderWithFormat(on ? "A4_P" : "Endless");
+  restoreScroll(scroll, { proportional: true });
 }
 
 async function print() {
   pausePlayback();
   hideCursor();
+  const pageView = state.pageFormat !== "Endless";
+  if (pageView) {
+    window.print();
+    return;
+  }
+  const scroll = scrollPosition();
   await renderWithFormat("A4_P");
   const restore = () => {
     window.removeEventListener("afterprint", restore);
-    renderWithFormat("Endless");
+    renderWithFormat("Endless").then(() => restoreScroll(scroll));
   };
   window.addEventListener("afterprint", restore);
   window.print();
 }
 
-function download() {
-  if (!state.transposedXml) return;
-  const base = `${ui.title.value.trim() || "partition"} - transposé`;
-  const name = base.replace(/[\\/:*?"<>|]+/g, "").slice(0, 120) + ".musicxml";
-  const blob = new Blob([state.transposedXml], { type: "application/vnd.recordare.musicxml+xml" });
+function saveFile(blob, base, extension) {
+  const name = `${base}`.replace(/[\\/:*?"<>|]+/g, "").slice(0, 120) + extension;
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = name;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// Partition transposée, pour MuseScore et autres logiciels.
+function download() {
+  if (!state.transposedXml) return;
+  const blob = new Blob([state.transposedXml], { type: "application/vnd.recordare.musicxml+xml" });
+  saveFile(blob, `${ui.title.value.trim() || "partition"} - transposé`, ".musicxml");
+}
+
+// Relecture à reprendre plus tard : partition corrigée (avant transposition),
+// original (PDF, images) et réglages, dans un seul fichier .mxl.
+async function saveReview() {
+  if (!state.sourceXml) return;
+  const originals = await Promise.all(state.originals.map(async (o) => ({
+    name: o.file.name,
+    bytes: new Uint8Array(await o.file.arrayBuffer()),
+  })));
+  const region = state.region === "all" || state.region === null || state.region.end ? state.region : "all";
+  const session = {
+    app: "TranspoZ",
+    version: 1,
+    savedAt: new Date().toISOString(),
+    title: ui.title.value.trim(),
+    semitones: Number(ui.semitones.value),
+    octave: Number(ui.octave.value),
+    keyPreference: ui.keyPref.value,
+    region,
+    tempo: Number(ui.tempo.value),
+    zoom: Number(ui.zoom.value),
+    spacing: Number(ui.spacing.value),
+    tightMargins: ui.tightMargins.checked,
+  };
+  const bytes = writeScoreFile(state.sourceXml, { originals, session });
+  saveFile(new Blob([bytes], { type: "application/vnd.recordare.musicxml" }), `${session.title || "partition"} - relecture`, ".mxl");
+  setStatus(originals.length
+    ? "Relecture enregistrée (partition corrigée + original). Rouvrez ce fichier .mxl pour la reprendre."
+    : "Relecture enregistrée. Rouvrez ce fichier .mxl pour la reprendre.");
+}
+
+// Réglages d'une relecture enregistrée (valeurs vérifiées : le fichier vient de l'extérieur).
+async function restoreSession(session) {
+  const clamp = (v, lo, hi, d) => (Number.isFinite(Number(v)) ? Math.max(lo, Math.min(hi, Math.round(Number(v)))) : d);
+  ui.semitones.value = String(clamp(session.semitones, -12, 12, 0));
+  ui.octave.value = String(clamp(session.octave, -2, 2, 0));
+  if (["auto", "sharps", "flats"].includes(session.keyPreference)) ui.keyPref.value = session.keyPreference;
+  const pos = (p) => p && Number.isInteger(p.measure) && p.measure >= 0 && Number.isFinite(p.offset) && p.offset >= 0;
+  const r = session.region;
+  state.region = r === null ? null : r && pos(r.start) && pos(r.end) ? { start: r.start, end: r.end } : "all";
+  const within = (v, lo, hi) => Number.isFinite(Number(v)) && Number(v) >= lo && Number(v) <= hi;
+  if (within(session.zoom, 0.5, 1.6)) ui.zoom.value = String(session.zoom);
+  if (within(session.spacing, 0, 1.5)) ui.spacing.value = String(session.spacing);
+  if (typeof session.tightMargins === "boolean") ui.tightMargins.checked = session.tightMargins;
+  if (Number.isFinite(Number(session.tempo))) {
+    ui.tempo.value = String(clamp(session.tempo, 30, 220, 100));
+    ui.tempoLabel.textContent = ui.tempo.value;
+    player.bpm = Number(ui.tempo.value);
+  }
+  await update();
 }
 
 // ---------------------------------------------------------------------------
@@ -1549,15 +1936,24 @@ ui.semiUp.addEventListener("click", () => {
   update();
 });
 ui.keyPref.addEventListener("change", update);
+ui.spacing.addEventListener("input", relayout);
+ui.tightMargins.addEventListener("change", relayout);
+ui.pageViewBtn.addEventListener("click", () => setPageView(ui.pageViewBtn.getAttribute("aria-pressed") !== "true"));
 ui.zoom.addEventListener("input", () => {
   if (!state.osmd || !state.sourceXml) return;
+  const scroll = scrollPosition();
   state.osmd.zoom = Number(ui.zoom.value);
   state.osmd.render();
   decorate();
+  restoreScroll(scroll, { proportional: true });
+  updatePageCount();
   if (state.cursorTimes) state.osmd.cursor?.update();
 });
 ui.printBtn.addEventListener("click", print);
 ui.downloadBtn.addEventListener("click", download);
+ui.saveBtn.addEventListener("click", saveReview);
+ui.attachBtn.addEventListener("click", () => ui.attachInput.click());
+ui.attachInput.addEventListener("change", () => attachOriginals(ui.attachInput.files));
 ui.playBtn.addEventListener("click", togglePlayback);
 ui.score.addEventListener("click", onScoreClick);
 ui.score.addEventListener("mousemove", onScoreMove);
@@ -1570,11 +1966,16 @@ document.addEventListener("mousedown", (e) => {
 for (const b of ui.modeButtons) b.addEventListener("click", () => setMode(b.dataset.mode));
 ui.playFromStart.addEventListener("click", stopPlayback);
 ui.selectAll.addEventListener("click", () => setRegion("all"));
+ui.applyTranspose.addEventListener("click", () => applyTransposition());
+for (const b of ui.wedgeButtons) {
+  b.addEventListener("click", () => setWedgePlacing(state.wedgePlacing?.type === b.dataset.wedgeType ? null : { type: b.dataset.wedgeType, start: null }));
+}
 ui.selectNone.addEventListener("click", () => setRegion(null));
 ui.editorTools.addEventListener("click", (e) => {
   const b = e.target.closest("button");
   if (!b || b.disabled) return;
   if (b.dataset.type) edit((doc, i) => editor.setDuration(doc, i, b.dataset.type));
+  else if (b.dataset.art) edit((doc, i) => editor.toggleArticulation(doc, i, b.dataset.art));
   else ACTIONS[b.dataset.action]?.();
 });
 ui.undoBtn.addEventListener("click", undo);
@@ -1589,6 +1990,29 @@ ui.tempo.addEventListener("input", () => {
     followPlayback();
   });
 });
+// Disposition des volets : haut / bas (par défaut) ou côte à côte, retenue par le navigateur.
+const LAYOUT_KEY = "transpoz.disposition";
+
+function setLayout(layout) {
+  const stacked = layout !== "side";
+  ui.views.classList.toggle("stacked", stacked);
+  ui.layoutBtn.textContent = stacked ? "⇆ Côte à côte" : "⇅ Haut / bas";
+  try {
+    localStorage.setItem(LAYOUT_KEY, stacked ? "stacked" : "side");
+  } catch {
+    // stockage indisponible (navigation privée) : le choix vaut pour cette visite
+  }
+}
+
+let savedLayout = null;
+try {
+  savedLayout = localStorage.getItem(LAYOUT_KEY);
+} catch {
+  savedLayout = null;
+}
+setLayout(savedLayout ?? "stacked");
+ui.layoutBtn.addEventListener("click", () => setLayout(ui.views.classList.contains("stacked") ? "side" : "stacked"));
+
 ui.originalBtn.addEventListener("click", () => {
   ui.original.hidden = !ui.original.hidden;
 });

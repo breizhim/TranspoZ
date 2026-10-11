@@ -5,22 +5,25 @@ Outil en ligne pour **transposer une partition** fournie en PDF ou en image (JPG
 1. on dépose la partition et on indique le **morceau** ;
 2. le serveur **reconnaît les notes** (reconnaissance optique de partitions, « OMR ») et produit un fichier MusicXML ;
 3. on choisit la **transposition** (tonalité et octave, sur toute la partition ou une sélection) : la partition se met à jour **en direct** dans le navigateur ;
-4. on l'**imprime** (ou on l'enregistre en PDF via la boîte d'impression), ou on télécharge le MusicXML pour la retoucher dans MuseScore.
+4. on l'**imprime** (ou on l'enregistre en PDF via la boîte d'impression), ou on télécharge le MusicXML pour la retoucher dans MuseScore ;
+5. on peut **enregistrer la relecture** (💾) pour la reprendre plus tard : un fichier `.mxl` qui contient la partition corrigée, le PDF ou les images d'origine et les réglages.
 
 ## Fonctionnalités
 
-- Import PDF (plusieurs pages), JPG/PNG (plusieurs fichiers = plusieurs pages), ou MusicXML (`.musicxml`, `.xml`, `.mxl`) directement.
+- Import PDF (plusieurs pages), JPG/PNG (plusieurs fichiers = plusieurs pages), ou MusicXML (`.musicxml`, `.xml`, `.mxl`) directement ; un MusicXML déposé avec son PDF garde ce PDF comme original ; « 📎 Joindre l'original » ajoute le PDF ou les images à une partition déjà ouverte.
+- Relecture enregistrée (💾) : archive `.mxl` standard (lisible par MuseScore) avec, dans `transpoz/`, les fichiers d'origine et les réglages (titre, tonalité, octave, sélection, tempo). La rouvrir recharge tout et affiche l'original.
 - Transposition par demi-tons et par octaves, appliquée à toute la partition ou à une sélection seulement.
 - Orthographe musicale correcte : armure recalculée (au plus 6 altérations, préférence ♯/♭ au choix), altérations accidentelles recalculées mesure par mesure, accords chiffrés transposés.
 - Changement de clé optionnel (ex. trombone en clé de fa → trompette en clé de sol).
-- Affichage de l'original à côté pour vérifier la reconnaissance.
-- Impression au format A4 (seule la partition est imprimée).
+- Nom de l'instrument en début de portée modifiable ou supprimable (« Voice » mis par défaut par la reconnaissance, par exemple).
+- Affichage de l'original avec la partition retranscrite : deux volets fixes, chacun avec son propre défilement, l'un au-dessus de l'autre (par défaut) ou côte à côte (choix retenu par le navigateur).
+- Impression au format A4 (seule la partition est imprimée) ; « 📄 Aperçu A4 » montre les pages et leur nombre, à régler avec le zoom, l'espace entre les lignes et les marges réduites pour tout faire tenir sur une feuille.
 - Encart « Modification » au-dessus de la partition, avec des modes :
   - **Lecture** (par défaut) : un clic place la barre de lecture, la lecture part de là ;
-  - **Notes** : clic sur une note pour changer sa durée (point compris), sa hauteur, ses altérations, ses liaisons (prolongation ou expression), la supprimer ou la dupliquer ; ajout d'une note ou d'un silence entre deux notes (trait bleu au survol, hauteur selon la position de la souris) ; couper ou fusionner des mesures ;
-  - **Transposition** : tonalité et octave, préférence d'armure ; tonalité et octave ne s'appliquent qu'à la sélection (en orange) : toute la partition par défaut, rien, ou une zone choisie par deux clics entre les notes (avec changement d'armure si elle suit les barres de mesure) ;
-  - **Nuances** : pp, mf, ff… et indications (cresc., rit.…) ; clic sur une barre de mesure pour un repère encadré (A, B, C…) ;
-  - **Clé & mesure** : clé, armure (appliquée ou non aux notes) et chiffrage à partir d'une mesure.
+  - **Notes** : clic sur une note pour changer sa durée (point compris), sa hauteur, ses altérations, ses articulations (piqué, tenuto, accent, marcato, très piqué, point d'orgue — entendues à la lecture), ses liaisons (prolongation ou expression), la supprimer ou la dupliquer ; ajout d'une note ou d'un silence entre deux notes (trait bleu au survol, hauteur selon la position de la souris) ; couper ou fusionner des mesures ;
+  - **Transposition** : tonalité et octave, préférence d'armure ; « ✔ Appliquer à la partition » réécrit la sélection transposée et permet d'en transposer une autre (commencer une nouvelle sélection applique aussi le décalage en cours) ; tonalité et octave ne s'appliquent qu'à la sélection (en orange) : toute la partition par défaut, rien, ou une zone choisie par deux clics entre les notes (avec changement d'armure si elle suit les barres de mesure) ;
+  - **Nuances** : pp, mf, ff… et indications (cresc., rit.…) ; soufflets (crescendo <, decrescendo >) placés par deux clics entre les notes, au format MusicXML standard (`<wedge>`) dessiné par OSMD ; clic sur une barre de mesure pour un repère encadré (A, B, C…) ;
+  - **Clé & mesure** : clé, armure (appliquée ou non aux notes) et chiffrage à partir d'une mesure ; durée d'une pause en mesures (le nombre s'affiche au-dessus de la pause).
 - Mesures dont la durée ne correspond pas au chiffrage encadrées en rouge ; annuler/rétablir et raccourcis clavier. Les corrections portent sur la partition d'origine : la transposition reste en direct.
 - Écoute de la partition transposée avec un son de trompette synthétisé (notes écrites ou sons réels, reprises et liaisons prises en compte), tempo réglable et curseur qui suit la lecture.
 
@@ -30,7 +33,7 @@ Outil en ligne pour **transposer une partition** fournie en PDF ou en image (JPG
 web/                 interface (HTML/CSS/JS, sans framework)
   transpose.js       moteur de transposition MusicXML (JS pur, testé sous Node)
   app.js             interface, rendu avec OpenSheetMusicDisplay, impression
-  mxl.js             lecture MusicXML / .mxl dans le navigateur
+  mxl.js             lecture MusicXML / .mxl, fichier de relecture (.mxl + originaux)
   player.js          lecture audio (synthé trompette Web Audio)
   editor.js          analyse des mesures et opérations de correction (JS pur, testé sous Node)
   config.js          adresse du serveur de reconnaissance
