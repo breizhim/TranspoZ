@@ -133,7 +133,9 @@ async function waitForOSMD() {
 async function getOSMD() {
   if (state.osmd) return state.osmd;
   const lib = await waitForOSMD();
-  state.osmd = new lib.OpenSheetMusicDisplay(ui.score, {
+  // OSMD dessine dans un sous-conteneur : sa largeur est celle, utile, du volet
+  // (sans la barre de défilement verticale), d'où aucun défilement horizontal parasite.
+  state.osmd = new lib.OpenSheetMusicDisplay($("score-canvas"), {
     backend: "svg",
     autoResize: false, // redimensionnement géré ici pour redécorer la partition
     drawTitle: true,
