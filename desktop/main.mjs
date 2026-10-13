@@ -280,23 +280,28 @@ app.whenReady().then(async () => {
 app.on("window-all-closed", () => app.quit());
 
 // ---------------------------------------------------------------------------
-// Auto-test (sans fenêtre visible) : TRANSPOZ_SELFTEST=<partition.pdf|jpg>
+// Auto-test (sans fenêtre visible) : TRANSPOZ_SELFTEST=<partition.pdf|png>
 // Charge l'interface, fait reconnaître le fichier comme un utilisateur, affiche
 // le résultat et quitte. Sert à vérifier une construction de l'application.
+// Facultatif : TRANSPOZ_SELFTEST_TIME (chiffrage imposé, ex. 4/4),
+// TRANSPOZ_SELFTEST_SHOT (capture PNG de la fenêtre, original affiché),
+// TRANSPOZ_SELFTEST_PRINT (impression de la partition en PDF).
 // ---------------------------------------------------------------------------
 
 async function selfTest(win, file) {
   const log = (...a) => process.stdout.write(`[auto-test] ${a.join(" ")}\n`);
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
   let code = 1;
   try {
     await new Promise((resolve) => win.webContents.once("did-finish-load", resolve));
     log("Audiveris :", findAudiveris()?.command ?? "introuvable");
     const data = await readFile(file);
+    const time = process.env.TRANSPOZ_SELFTEST_TIME ?? "auto";
     const result = await win.webContents.executeJavaScript(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
-      const file = new File([new Uint8Array(${JSON.stringify([...data])})], ${JSON.stringify(path.basename(file))});
-      const time = ${JSON.stringify(process.env.TRANSPOZ_SELFTEST_TIME ?? "auto")};
-      document.getElementById("omr-time").value = time;
+      const file = new File([new Uint8Array(${JSON.stringify([...data])})], ${JSON.stringify(path.basename(file))},
+        { type: ${JSON.stringify(file.toLowerCase().endsWith(".pdf") ? "application/pdf" : "")} });
+      document.getElementById("omr-time").value = ${JSON.stringify(time)};
       const dt = new DataTransfer(); dt.items.add(file);
       document.getElementById("dropzone").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
       const t0 = Date.now();
@@ -304,13 +309,32 @@ async function selfTest(win, file) {
         if (document.querySelector("#status.error")) break;
         await wait(250);
       }
+      await wait(500);
       return { status: document.getElementById("status").textContent, notes: document.querySelectorAll(".tz-note").length };
     })()`);
+    log("chiffrage demandé :", time);
     log("statut :", result.status);
     log("notes affichées :", result.notes);
     code = result.notes > 0 ? 0 : 1;
+
+    if (code === 0 && process.env.TRANSPOZ_SELFTEST_PRINT) {
+      const pdf = await win.webContents.printToPDF({ pageSize: "A4", printBackground: true });
+      await writeFile(process.env.TRANSPOZ_SELFTEST_PRINT, pdf);
+      log("impression PDF :", pdf.length, "octets");
+      if (pdf.length < 2000) code = 1;
+    }
+    if (code === 0 && process.env.TRANSPOZ_SELFTEST_SHOT) {
+      // Original affiché à côté de la partition (visionneuse PDF de l'application).
+      win.setSize(1440, 920);
+      await win.webContents.executeJavaScript(`document.getElementById("original-btn").click(); true`);
+      await wait(3000);
+      const image = await win.webContents.capturePage();
+      await writeFile(process.env.TRANSPOZ_SELFTEST_SHOT, image.toPNG());
+      log("capture :", image.getSize().width, "x", image.getSize().height);
+    }
   } catch (err) {
     log("erreur :", err.message);
+    code = 1;
   }
   app.exit(code);
 }

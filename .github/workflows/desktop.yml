@@ -61,6 +61,11 @@ jobs:
         run: |
           sudo apt-get install -y ./dist/*.deb
           TRANSPOZ_SELFTEST="$PWD/test/partition.png" xvfb-run -a /opt/TranspoZ/transpoz --no-sandbox
+          # PDF, chiffrage imposé, impression et capture de la fenêtre (original affiché).
+          mkdir -p captures
+          TRANSPOZ_SELFTEST="$PWD/test/partition.pdf" TRANSPOZ_SELFTEST_TIME=4/4 \
+            TRANSPOZ_SELFTEST_SHOT="$PWD/captures/linux.png" TRANSPOZ_SELFTEST_PRINT="$PWD/captures/linux-impression.pdf" \
+            xvfb-run -a -s "-screen 0 1600x1000x24" /opt/TranspoZ/transpoz --no-sandbox
       - name: Vérification après installation (Windows)
         if: matrix.target == 'win'
         working-directory: desktop
@@ -73,6 +78,15 @@ jobs:
           $env:TRANSPOZ_SELFTEST = "$PWD\test\partition.png"
           $p = Start-Process -FilePath $exe -Wait -PassThru -RedirectStandardOutput installed.txt
           Get-Content installed.txt
+          if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+          # PDF, chiffrage imposé, impression et capture de la fenêtre (original affiché).
+          New-Item -ItemType Directory -Force captures | Out-Null
+          $env:TRANSPOZ_SELFTEST = "$PWD\test\partition.pdf"
+          $env:TRANSPOZ_SELFTEST_TIME = "4/4"
+          $env:TRANSPOZ_SELFTEST_SHOT = "$PWD\captures\windows.png"
+          $env:TRANSPOZ_SELFTEST_PRINT = "$PWD\captures\windows-impression.pdf"
+          $p = Start-Process -FilePath $exe -Wait -PassThru -RedirectStandardOutput installed-pdf.txt
+          Get-Content installed-pdf.txt
           exit $p.ExitCode
       - name: Vérification de l'application construite (Windows)
         if: matrix.target == 'win'
@@ -83,6 +97,11 @@ jobs:
           $p = Start-Process -FilePath "dist\win-unpacked\TranspoZ.exe" -Wait -PassThru -RedirectStandardOutput selftest.txt
           Get-Content selftest.txt
           exit $p.ExitCode
+      - uses: actions/upload-artifact@v4
+        with:
+          name: captures-${{ matrix.target }}
+          path: desktop/captures/
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         with:
           name: TranspoZ-${{ matrix.target }}
