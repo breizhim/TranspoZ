@@ -47,6 +47,10 @@ jobs:
       - name: Construction
         run: npm run dist:${{ matrix.target }}
         working-directory: desktop
+      - name: Dépendances du paquet .rpm à jour
+        if: matrix.target == 'linux'
+        working-directory: desktop
+        run: node scripts/linux-libs.mjs --check
       - name: Vérification de l'application construite (reconnaissance d'une partition)
         if: matrix.target == 'linux'
         working-directory: desktop

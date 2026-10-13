@@ -39,6 +39,10 @@ Le workflow `.github/workflows/desktop.yml` construit Linux et Windows, vérifie
 l'application construite (auto-test : reconnaissance de `test/partition.png`) et joint
 les fichiers à la publication GitHub à chaque tag `v*`.
 
+Dépendances du `.rpm` : les bibliothèques réellement demandées par les exécutables (Electron et le Java
+d'Audiveris), déclarées par leur nom (`libgbm.so.1()(64bit)`…) dans `package.json`. Après une mise à jour
+d'Electron ou d'Audiveris : `node scripts/linux-libs.mjs` pour la liste, `--check` pour vérifier (fait par le workflow).
+
 Auto-test à la main : `TRANSPOZ_SELFTEST=chemin/partition.png dist/linux-unpacked/transpoz`.
 
 Licences des logiciels livrés : voir `THIRD_PARTY.md` (Audiveris est sous AGPL-3.0).
