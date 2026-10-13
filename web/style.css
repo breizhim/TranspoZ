@@ -161,6 +161,7 @@ button.link { border: none; background: none; color: var(--accent); padding: 4px
 .stage { min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 
 .score {
+  scrollbar-gutter: stable; /* place de la barre verticale réservée : pas de défilement horizontal parasite */
   background: var(--paper);
   color: #000;
   border-radius: var(--radius);
