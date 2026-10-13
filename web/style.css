@@ -79,7 +79,7 @@ body {
 }
 
 .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; min-width: 0; }
-.field label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.field label, .field .label { font-size: 13px; font-weight: 600; color: var(--muted); }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
 input[type="text"], select {
@@ -135,8 +135,6 @@ button.link { border: none; background: none; color: var(--accent); padding: 4px
 #part-names .hint { margin: 4px 0 0; }
 .hint { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
 
-.stepper { display: grid; grid-template-columns: 36px 1fr 36px; gap: 8px; align-items: center; }
-.stepper button { padding: 4px 0; font-size: 18px; font-weight: 700; }
 
 .summary {
   background: var(--accent-soft);
@@ -273,8 +271,7 @@ button.link { border: none; background: none; color: var(--accent); padding: 4px
 .tp-grid > .hint { margin: -4px 0 10px; }
 /* Encart haut en mode Transposition : il défile avec la page au lieu de masquer la partition. */
 .editor:has([data-panel="transpose"]:not([hidden])) { position: static; }
-.tp-apply { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-bottom: 8px; }
-.tp-apply .hint { margin: 0; }
+.tp-shift { display: flex; flex-wrap: wrap; gap: 6px; }
 .tp-selection { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
 #region-info { font-size: 14px; }
 @media (max-width: 700px) {

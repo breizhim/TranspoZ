@@ -4,14 +4,14 @@ Outil en ligne pour **transposer une partition** fournie en PDF ou en image (JPG
 
 1. on dépose la partition et on indique le **morceau** ;
 2. le serveur **reconnaît les notes** (reconnaissance optique de partitions, « OMR ») et produit un fichier MusicXML ;
-3. on choisit la **transposition** (tonalité et octave, sur toute la partition ou une sélection) : la partition se met à jour **en direct** dans le navigateur ;
+3. on **transpose** (demi-tons et octaves, sur toute la partition ou une sélection) : chaque clic réécrit la partition **immédiatement** dans le navigateur ;
 4. on l'**imprime** (ou on l'enregistre en PDF via la boîte d'impression), ou on télécharge le MusicXML pour la retoucher dans MuseScore ;
 5. on peut **enregistrer la relecture** (💾) pour la reprendre plus tard : un fichier `.mxl` qui contient la partition corrigée, le PDF ou les images d'origine et les réglages.
 
 ## Fonctionnalités
 
 - Import PDF (plusieurs pages), JPG/PNG (plusieurs fichiers = plusieurs pages), ou MusicXML (`.musicxml`, `.xml`, `.mxl`) directement ; un MusicXML déposé avec son PDF garde ce PDF comme original ; « 📎 Joindre l'original » ajoute le PDF ou les images à une partition déjà ouverte.
-- Relecture enregistrée (💾) : archive `.mxl` standard (lisible par MuseScore) avec, dans `transpoz/`, les fichiers d'origine et les réglages (titre, tonalité, octave, sélection, tempo). La rouvrir recharge tout et affiche l'original.
+- Relecture enregistrée (💾) : archive `.mxl` standard (lisible par MuseScore) avec, dans `transpoz/`, les fichiers d'origine et les réglages (titre, sélection, tempo). La rouvrir recharge tout et affiche l'original.
 - Transposition par demi-tons et par octaves, appliquée à toute la partition ou à une sélection seulement.
 - Orthographe musicale correcte : armure recalculée (au plus 6 altérations, préférence ♯/♭ au choix), altérations accidentelles recalculées mesure par mesure, accords chiffrés transposés.
 - Changement de clé optionnel (ex. trombone en clé de fa → trompette en clé de sol).
@@ -21,7 +21,7 @@ Outil en ligne pour **transposer une partition** fournie en PDF ou en image (JPG
 - Encart « Modification » au-dessus de la partition, avec des modes :
   - **Lecture** (par défaut) : un clic place la barre de lecture, la lecture part de là ;
   - **Notes** : clic sur une note pour changer sa durée (point compris), sa hauteur, ses altérations, ses articulations (piqué, tenuto, accent, marcato, très piqué, point d'orgue — entendues à la lecture), ses liaisons (prolongation ou expression), la supprimer ou la dupliquer ; ajout d'une note ou d'un silence entre deux notes (trait bleu au survol, hauteur selon la position de la souris) ; couper ou fusionner des mesures ;
-  - **Transposition** : tonalité et octave, préférence d'armure ; « ✔ Appliquer à la partition » réécrit la sélection transposée et permet d'en transposer une autre (commencer une nouvelle sélection applique aussi le décalage en cours) ; tonalité et octave ne s'appliquent qu'à la sélection (en orange) : toute la partition par défaut, rien, ou une zone choisie par deux clics entre les notes (avec changement d'armure si elle suit les barres de mesure) ;
+  - **Transposition** : boutons −½ ton, +½ ton, −1 octave, +1 octave, appliqués dès le clic à la sélection (en orange) et annulables (Ctrl+Z) ; les clics se cumulent ; préférence d'armure ; la sélection est toute la partition par défaut, rien, ou une zone choisie par deux clics entre les notes (avec changement d'armure si elle suit les barres de mesure) ;
   - **Nuances** : pp, mf, ff… et indications (cresc., rit.…) ; soufflets (crescendo <, decrescendo >) placés par deux clics entre les notes, au format MusicXML standard (`<wedge>`) dessiné par OSMD ; clic sur une barre de mesure pour un repère encadré (A, B, C…) ;
   - **Clé & mesure** : clé, armure (appliquée ou non aux notes) et chiffrage à partir d'une mesure ; durée d'une pause en mesures (le nombre s'affiche au-dessus de la pause).
 - Mesures dont la durée ne correspond pas au chiffrage encadrées en rouge ; annuler/rétablir et raccourcis clavier. Les corrections portent sur la partition d'origine : la transposition reste en direct.

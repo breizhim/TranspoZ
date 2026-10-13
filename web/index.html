@@ -190,23 +190,14 @@
             </div>
 
             <div class="field tp-wide">
-              <label for="semitones">Tonalité de la sélection</label>
-              <div class="stepper">
-                <button type="button" id="semi-down" aria-label="Un demi-ton plus bas">−</button>
-                <input type="range" id="semitones" min="-12" max="12" step="1" value="0">
-                <button type="button" id="semi-up" aria-label="Un demi-ton plus haut">+</button>
+              <span class="label">Transposer la sélection</span>
+              <div class="tp-shift">
+                <button type="button" data-shift="-1" title="Un demi-ton plus bas">−½ ton</button>
+                <button type="button" data-shift="1" title="Un demi-ton plus haut">+½ ton</button>
+                <button type="button" data-shift="-12" title="Une octave plus bas">−1 octave</button>
+                <button type="button" data-shift="12" title="Une octave plus haut">+1 octave</button>
               </div>
-              <p class="hint" id="semi-label">aucune</p>
-            </div>
-            <div class="field">
-              <label for="octave">Octave de la sélection</label>
-              <select id="octave">
-                <option value="2">+2 octaves</option>
-                <option value="1">+1 octave</option>
-                <option value="0" selected>inchangée</option>
-                <option value="-1">−1 octave</option>
-                <option value="-2">−2 octaves</option>
-              </select>
+              <p class="hint" id="shift-label">Appliqué dès le clic (annulable avec Ctrl+Z).</p>
             </div>
             <div class="field">
               <label for="key-pref">Armure</label>
@@ -216,16 +207,10 @@
                 <option value="flats">Plutôt des ♭</option>
               </select>
             </div>
-            <div class="tp-full tp-apply">
-              <button type="button" class="primary" id="apply-transpose" disabled>✔ Appliquer à la partition</button>
-              <span class="hint" id="apply-hint">Réécrit la sélection transposée, puis remet tonalité et octave à zéro
-                pour transposer une autre partie.</span>
-            </div>
             <div class="summary tp-full" id="summary" hidden></div>
           </div>
           <p class="hint">Cliquez entre deux notes pour placer le début de la sélection, puis la fin (en orange).
-            Tonalité et octave ne changent que la sélection : le reste de la partition n'est pas touché.
-            Commencer une nouvelle sélection applique d'abord le décalage en cours.</p>
+            Seule la sélection est transposée : le reste de la partition n'est pas touché.</p>
         </div>
 
         <div class="mode-panel" data-panel="dynamics" hidden>

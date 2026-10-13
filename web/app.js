@@ -30,10 +30,7 @@ const ui = {
   sampleBtn: $("sample-btn"),
   status: $("status"),
   title: $("title"),
-  semitones: $("semitones"),
-  semiDown: $("semi-down"),
-  semiUp: $("semi-up"),
-  semiLabel: $("semi-label"),
+  shiftButtons: [...document.querySelectorAll("[data-shift]")],
   keyPref: $("key-pref"),
   summary: $("summary"),
   printBtn: $("print-btn"),
@@ -56,7 +53,6 @@ const ui = {
   playBtn: $("play-btn"),
   stopBtn: $("stop-btn"),
   tempo: $("tempo"),
-  octave: $("octave"),
   tempoLabel: $("tempo-label"),
   editor: $("editor"),
   editorTools: $("editor-tools"),
@@ -73,7 +69,6 @@ const ui = {
   wedgeButtons: [...document.querySelectorAll("[data-wedge-type]")],
   wedgeInfo: $("wedge-info"),
   selectAll: $("select-all"),
-  applyTranspose: $("apply-transpose"),
   selectNone: $("select-none"),
   original: $("original"),
   empty: $("empty"),
@@ -83,6 +78,7 @@ const ui = {
 const state = {
   sourceXml: null,
   transposedXml: null,
+  appliedShift: 0, // demi-tons déjà écrits dans la sélection en cours (affichage)
   originals: [], // { url, type }
   osmd: null,
   rendering: false,
@@ -188,15 +184,14 @@ function relayout() {
   updatePageCount();
 }
 
-// Décalage choisi pour la sélection : tonalité (demi-tons) + octave.
-function selectionShift() {
-  const octaves = Number(ui.octave.value);
-  return addIntervals(intervalFromSemitones(Number(ui.semitones.value)), { diatonic: 7 * octaves, chromatic: 12 * octaves });
+// Demi-tons et octaves → intervalle (une octave reste une octave, pas une septième augmentée).
+function shiftInterval(semitones, octaves = 0) {
+  return addIntervals(intervalFromSemitones(semitones), { diatonic: 7 * octaves, chromatic: 12 * octaves });
 }
 
 // Seule la sélection est transposée ; le reste de la partition n'est pas touché.
-function buildTransposition() {
-  const shift = selectionShift();
+// À l'affichage, shift vaut UNISON : les transpositions sont déjà écrites dans la source.
+function buildTransposition(shift = UNISON) {
   const region = state.region?.end ? state.region : null;
   return {
     options: {
@@ -212,21 +207,15 @@ function describeKey(key) {
   return key.mode ? keyName(key.fifths, key.mode) : `${keyName(key.fifths)} (${keySignatureLabel(key.fifths)})`;
 }
 
-function showSummary(report, { options }) {
+function showSummary(report) {
   const part = report.parts[0];
   if (!part) {
     ui.summary.hidden = true;
     return;
   }
-  const writtenShift = options.interval.chromatic;
-  const lines = [
-    `<p><strong>Tonalité :</strong> ${describeKey(part.from)} → <strong>${describeKey(part.to)}</strong></p>`,
-    `<p><strong>Notes écrites :</strong> ${semitoneLabel(writtenShift)}</p>`,
-  ];
-  if (options.region) {
-    lines.push(`<p><strong>Sélection (${regionLabel(options.region)}) :</strong> ${semitoneLabel(part.regionInterval.chromatic)}</p>`);
-  } else if (state.region !== "all" && selectionShift().chromatic) {
-    lines.push("<p><strong>Changement de tonalité :</strong> sans effet, rien n'est sélectionné.</p>");
+  const lines = [`<p><strong>Tonalité :</strong> ${describeKey(part.from)}</p>`];
+  if (state.appliedShift) {
+    lines.push(`<p><strong>Transposition appliquée à la sélection :</strong> ${semitoneLabel(state.appliedShift)}</p>`);
   }
   ui.summary.innerHTML = lines.join("");
   ui.summary.hidden = false;
@@ -237,7 +226,7 @@ function transpose() {
   if (doc.getElementsByTagName("parsererror").length) throw new Error("Partition MusicXML illisible.");
   const settings = buildTransposition();
   const report = transposeScore(doc, settings.options);
-  showSummary(report, settings);
+  showSummary(report);
   loadPlayer(doc);
   state.transposedDoc = doc;
   state.report = report;
@@ -281,7 +270,6 @@ function restoreScroll(pos, { proportional = false } = {}) {
 
 // Un seul rendu à la fois : les changements rapides sont regroupés.
 async function update() {
-  ui.semiLabel.textContent = semitoneLabel(Number(ui.semitones.value));
   updateRegionInfo();
   if (!state.sourceXml) return;
   if (state.rendering) {
@@ -363,8 +351,7 @@ function resetForNewScore() {
   state.noteEls = new Map();
   state.analysis = null;
   ui.score.scrollTop = 0; // nouvelle partition : on repart du début
-  ui.semitones.value = "0";
-  ui.octave.value = "0";
+  state.appliedShift = 0;
   ui.keyPref.value = "auto";
   ui.score.scrollLeft = 0;
   updateHistoryButtons();
@@ -880,6 +867,7 @@ function commit(xml, selected) {
 
 function undo() {
   if (!state.history.length) return;
+  state.appliedShift = 0; // le cumul affiché ne suit pas l'historique
   state.future.push(state.sourceXml);
   state.sourceXml = state.history.pop();
   updateHistoryButtons();
@@ -888,6 +876,7 @@ function undo() {
 
 function redo() {
   if (!state.future.length) return;
+  state.appliedShift = 0; // le cumul affiché ne suit pas l'historique
   state.history.push(state.sourceXml);
   state.sourceXml = state.future.pop();
   updateHistoryButtons();
@@ -1259,29 +1248,28 @@ function intervalAt(part, pos) {
   return inRegion(pos) ? p.regionInterval : p.interval;
 }
 
-// Décalage en attente : tonalité ou octave non nulles sur une sélection non vide.
-function pendingShift() {
-  const r = state.region;
-  return Boolean(selectionShift().chromatic) && (r === "all" || Boolean(r?.end));
-}
+const hasSelection = () => state.region === "all" || Boolean(state.region?.end);
 
-// Réécrit la partition avec la sélection transposée, puis repart de zéro pour une autre sélection.
-function applyTransposition({ automatic = false } = {}) {
-  if (!pendingShift() || !state.transposedXml || state.rendering || state.dirty) return false;
+// Transpose la sélection tout de suite, dans la partition elle-même (annulable).
+// La sélection reste en place : on peut cliquer plusieurs fois pour cumuler.
+function transposeSelection(shift) {
+  if (!state.sourceXml || !shift.chromatic) return;
+  if (!hasSelection()) {
+    setStatus("Sélectionnez d'abord une partie de la partition (ou « Tout »).");
+    return;
+  }
+  const doc = new DOMParser().parseFromString(state.sourceXml, "application/xml");
+  if (doc.getElementsByTagName("parsererror").length) return;
+  transposeScore(doc, buildTransposition(shift).options);
+  state.appliedShift += shift.chromatic;
   const label = state.region === "all" ? "toute la partition" : regionLabel(state.region);
-  const shift = semitoneLabel(selectionShift().chromatic);
-  const xml = state.transposedXml;
-  ui.semitones.value = "0";
-  ui.octave.value = "0";
-  state.region = null;
-  commit(xml, state.selected);
-  setStatus(`${automatic ? "Décalage précédent appliqué" : "Appliqué"} : ${shift} sur ${label}.${automatic ? "" : " Choisissez une autre sélection."}`);
-  return true;
+  commit(new XMLSerializer().serializeToString(doc), state.selected);
+  setStatus(`${label[0].toUpperCase()}${label.slice(1)} : ${semitoneLabel(state.appliedShift)} au total.`);
 }
 
 function updateRegionInfo() {
   const r = state.region;
-  ui.applyTranspose.disabled = !pendingShift();
+  for (const b of ui.shiftButtons) b.disabled = !state.sourceXml || !hasSelection();
   ui.selectAll.disabled = r === "all";
   ui.selectNone.disabled = r === null;
   if (r === "all") ui.regionInfo.textContent = "Toute la partition est sélectionnée.";
@@ -1292,12 +1280,12 @@ function updateRegionInfo() {
 
 function setRegion(region) {
   state.region = region;
+  state.appliedShift = 0;
   update();
 }
 
 function setRegionBoundary(pos) {
-  // Nouvelle sélection : le décalage de la précédente est d'abord appliqué.
-  if (state.region === "all" || state.region?.end) applyTransposition({ automatic: true });
+  state.appliedShift = 0;
   const r = state.region;
   if (!r || r === "all" || r.end) state.region = { start: pos, end: null };
   else {
@@ -1905,8 +1893,6 @@ async function saveReview() {
     version: 1,
     savedAt: new Date().toISOString(),
     title: ui.title.value.trim(),
-    semitones: Number(ui.semitones.value),
-    octave: Number(ui.octave.value),
     keyPreference: ui.keyPref.value,
     region,
     tempo: Number(ui.tempo.value),
@@ -1924,8 +1910,8 @@ async function saveReview() {
 // Réglages d'une relecture enregistrée (valeurs vérifiées : le fichier vient de l'extérieur).
 async function restoreSession(session) {
   const clamp = (v, lo, hi, d) => (Number.isFinite(Number(v)) ? Math.max(lo, Math.min(hi, Math.round(Number(v)))) : d);
-  ui.semitones.value = String(clamp(session.semitones, -12, 12, 0));
-  ui.octave.value = String(clamp(session.octave, -2, 2, 0));
+  // Anciennes relectures : tonalité et octave étaient réglées « en direct », sans être écrites.
+  const oldShift = shiftInterval(clamp(session.semitones, -12, 12, 0), clamp(session.octave, -2, 2, 0));
   if (["auto", "sharps", "flats"].includes(session.keyPreference)) ui.keyPref.value = session.keyPreference;
   const pos = (p) => p && Number.isInteger(p.measure) && p.measure >= 0 && Number.isFinite(p.offset) && p.offset >= 0;
   const r = session.region;
@@ -1940,6 +1926,11 @@ async function restoreSession(session) {
     player.bpm = Number(ui.tempo.value);
   }
   await update();
+  if (oldShift.chromatic && hasSelection()) {
+    transposeSelection(oldShift);
+    state.history = []; // la transposition fait partie de la relecture d'origine
+    updateHistoryButtons();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1968,15 +1959,12 @@ ui.title.addEventListener("input", () => {
   clearTimeout(titleTimer);
   titleTimer = setTimeout(update, 300);
 });
-ui.semitones.addEventListener("input", update);
-ui.semiDown.addEventListener("click", () => {
-  ui.semitones.stepDown();
-  update();
-});
-ui.semiUp.addEventListener("click", () => {
-  ui.semitones.stepUp();
-  update();
-});
+for (const b of ui.shiftButtons) {
+  b.addEventListener("click", () => {
+    const n = Number(b.dataset.shift);
+    transposeSelection(Math.abs(n) === 12 ? shiftInterval(0, Math.sign(n)) : shiftInterval(n));
+  });
+}
 ui.keyPref.addEventListener("change", update);
 ui.spacing.addEventListener("input", relayout);
 ui.tightMargins.addEventListener("change", relayout);
@@ -2008,7 +1996,6 @@ document.addEventListener("mousedown", (e) => {
 for (const b of ui.modeButtons) b.addEventListener("click", () => setMode(b.dataset.mode));
 ui.playFromStart.addEventListener("click", stopPlayback);
 ui.selectAll.addEventListener("click", () => setRegion("all"));
-ui.applyTranspose.addEventListener("click", () => applyTransposition());
 for (const b of ui.wedgeButtons) {
   b.addEventListener("click", () => setWedgePlacing(state.wedgePlacing?.type === b.dataset.wedgeType ? null : { type: b.dataset.wedgeType, start: null }));
 }
@@ -2024,7 +2011,6 @@ ui.undoBtn.addEventListener("click", undo);
 ui.redoBtn.addEventListener("click", redo);
 document.addEventListener("keydown", handleEditorKey);
 ui.stopBtn.addEventListener("click", stopPlayback);
-ui.octave.addEventListener("change", update);
 ui.tempo.addEventListener("input", () => {
   ui.tempoLabel.textContent = ui.tempo.value;
   player.setBpm(Number(ui.tempo.value)).then(() => {
