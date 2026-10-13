@@ -82,6 +82,10 @@ uvicorn server.main:app --reload   # http://localhost:8000
 
 Sans moteur OMR, l'outil fonctionne quand même avec des fichiers MusicXML (et le bouton « Essayer avec un exemple »).
 
+## Hébergement mutualisé o2switch
+
+Version web complète (avec reconnaissance) sur un hébergement o2switch : voir [`deploy/o2switch/README.md`](deploy/o2switch/README.md) ; mise à jour en une commande : `./deploy/o2switch/deploy.sh`.
+
 ## Docker
 
 ```bash
