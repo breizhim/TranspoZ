@@ -113,7 +113,8 @@
         "libxkbcommon.so.0()(64bit)",
         "libz.so.1()(64bit)",
         "xdg-utils"
-      ]
+      ],
+      "afterRemove": "resources/rpm-after-remove.sh"
     }
   },
   "homepage": "https://github.com/breizhim/TranspoZ"

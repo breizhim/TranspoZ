@@ -102,3 +102,30 @@ jobs:
           files=(desktop/dist/*.AppImage desktop/dist/*.deb desktop/dist/*.rpm desktop/dist/*.exe)
           gh release create "$GITHUB_REF_NAME" --title "TranspoZ ${GITHUB_REF_NAME#v}" --notes "Voir le README." 2>/dev/null || true
           gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+
+  # Le paquet .rpm dans les conditions réelles : installation par dnf sur Fedora,
+  # réinstallation (le lien /usr/bin/transpoz doit survivre), reconnaissance, désinstallation.
+  fedora-rpm:
+    needs: build
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: TranspoZ-linux
+          path: paquets
+      - name: Installation
+        run: |
+          dnf install -y ./paquets/*.rpm xorg-x11-server-Xvfb xorg-x11-xauth which
+          test -e /usr/bin/transpoz
+      - name: Réinstallation (le lien /usr/bin/transpoz doit rester)
+        run: |
+          dnf reinstall -y ./paquets/*.rpm
+          test -e /usr/bin/transpoz || { echo "Lien /usr/bin/transpoz supprimé par la réinstallation"; exit 1; }
+      - name: Reconnaissance avec l'application installée
+        run: TRANSPOZ_SELFTEST="$PWD/desktop/test/partition.png" xvfb-run -a transpoz --no-sandbox
+      - name: Désinstallation (le lien disparaît)
+        run: |
+          dnf remove -y transpoz-desktop
+          test ! -e /usr/bin/transpoz
