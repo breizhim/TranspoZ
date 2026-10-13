@@ -55,6 +55,25 @@ jobs:
         if: matrix.target == 'linux'
         working-directory: desktop
         run: TRANSPOZ_SELFTEST="$PWD/test/partition.png" xvfb-run -a dist/linux-unpacked/transpoz --no-sandbox
+      - name: Vérification après installation du paquet .deb (fichiers d'un paquet système)
+        if: matrix.target == 'linux'
+        working-directory: desktop
+        run: |
+          sudo apt-get install -y ./dist/*.deb
+          TRANSPOZ_SELFTEST="$PWD/test/partition.png" xvfb-run -a /opt/TranspoZ/transpoz --no-sandbox
+      - name: Vérification après installation (Windows)
+        if: matrix.target == 'win'
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist\*.exe | Select-Object -First 1
+          Start-Process -FilePath $installer.FullName -ArgumentList "/S" -Wait
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\TranspoZ\TranspoZ.exe"
+          if (-not (Test-Path $exe)) { Write-Error "Application installée introuvable : $exe"; exit 1 }
+          $env:TRANSPOZ_SELFTEST = "$PWD\test\partition.png"
+          $p = Start-Process -FilePath $exe -Wait -PassThru -RedirectStandardOutput installed.txt
+          Get-Content installed.txt
+          exit $p.ExitCode
       - name: Vérification de l'application construite (Windows)
         if: matrix.target == 'win'
         working-directory: desktop

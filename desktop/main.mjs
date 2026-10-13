@@ -8,7 +8,7 @@
 
 import { app, BrowserWindow, ipcMain, protocol, shell } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -62,17 +62,59 @@ protocol.registerSchemesAsPrivileged([
 // Audiveris
 // ---------------------------------------------------------------------------
 
+// Dossier d'Audiveris livré avec l'application (TRANSPOZ_AUDIVERIS_DIR pour en tester un autre).
+function audiverisRoot() {
+  if (process.env.TRANSPOZ_AUDIVERIS_DIR) return process.env.TRANSPOZ_AUDIVERIS_DIR;
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "audiveris")
+    : path.join(here, "vendor", process.platform === "win32" ? "audiveris-win" : "audiveris-linux");
+}
+
+/**
+ * Commande pour lancer Audiveris : { command, prefix } (arguments à placer avant ceux d'Audiveris).
+ *
+ * On lance directement le Java livré avec Audiveris, avec les paramètres de son fichier
+ * Audiveris.cfg, plutôt que son lanceur (bin/Audiveris, Audiveris.exe) : installé par un
+ * paquet système (.rpm, .deb), ce lanceur interroge le gestionnaire de paquets pour
+ * retrouver ses fichiers, ne les trouve pas (ils appartiennent au paquet TranspoZ) et
+ * échoue avec « Error opening "Audiveris.cfg" file ».
+ */
 function findAudiveris() {
-  if (process.env.AUDIVERIS_CMD) return process.env.AUDIVERIS_CMD;
-  const exe = process.platform === "win32" ? "Audiveris.exe" : path.join("bin", "Audiveris");
-  const roots = app.isPackaged
-    ? [path.join(process.resourcesPath, "audiveris")]
-    : [path.join(here, "vendor", process.platform === "win32" ? "audiveris-win" : "audiveris-linux")];
-  for (const root of roots) {
-    const file = path.join(root, exe);
-    if (existsSync(file)) return file;
+  if (process.env.AUDIVERIS_CMD) return { command: process.env.AUDIVERIS_CMD, prefix: [] };
+  const root = audiverisRoot();
+  const win = process.platform === "win32";
+  // Linux : lib/app et lib/runtime ; Windows : app et runtime.
+  const appDir = path.join(root, win ? "app" : path.join("lib", "app"));
+  const java = path.join(root, win ? "runtime" : path.join("lib", "runtime"), "bin", win ? "java.exe" : "java");
+  const cfg = path.join(appDir, "Audiveris.cfg");
+  if (existsSync(cfg) && existsSync(java)) {
+    const settings = parseLauncherConfig(readFileSync(cfg, "utf8"), appDir, root);
+    if (settings.mainClass && settings.classpath.length) {
+      return {
+        command: java,
+        prefix: [...settings.javaOptions, "-cp", settings.classpath.join(path.delimiter), settings.mainClass],
+      };
+    }
   }
-  return null;
+  const launcher = path.join(root, win ? "Audiveris.exe" : path.join("bin", "Audiveris"));
+  return existsSync(launcher) ? { command: launcher, prefix: [] } : null;
+}
+
+// Fichier .cfg de jpackage : [Application] app.classpath / app.mainclass, [JavaOptions] java-options.
+function parseLauncherConfig(text, appDir, rootDir) {
+  const expand = (v) => v.replaceAll("$APPDIR", appDir).replaceAll("$ROOTDIR", rootDir);
+  const settings = { classpath: [], mainClass: null, javaOptions: [] };
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    const eq = line.indexOf("=");
+    if (eq < 0 || line.startsWith("[") || line.startsWith("#")) continue;
+    const key = line.slice(0, eq).trim();
+    const value = expand(line.slice(eq + 1).trim());
+    if (key === "app.classpath") settings.classpath.push(value);
+    else if (key === "app.mainclass") settings.mainClass = value;
+    else if (key === "java-options") settings.javaOptions.push(value);
+  }
+  return settings;
 }
 
 function detectKind(name, data) {
@@ -132,8 +174,8 @@ async function listOutputs(dir) {
  * produits par Audiveris, une ou plusieurs pages par fichier.
  */
 async function recognize(files) {
-  const command = findAudiveris();
-  if (!command) return { error: "Audiveris est introuvable dans l'application." };
+  const audiveris = findAudiveris();
+  if (!audiveris) return { error: "Audiveris est introuvable dans l'application." };
   const work = await mkdtemp(path.join(tmpdir(), "transpoz-"));
   try {
     // Dossier de langues vide : pas de lecture de texte (OCR), qui ajoute des
@@ -147,7 +189,7 @@ async function recognize(files) {
       await writeFile(input, file.data);
       const out = path.join(work, `out${index}`);
       await mkdir(out);
-      await run(command, ["-batch", "-export", "-output", out, "--", input], { cwd: work, env });
+      await run(audiveris.command, [...audiveris.prefix, "-batch", "-export", "-output", out, "--", input], { cwd: work, env });
       const outputs = await listOutputs(out);
       if (!outputs.length) throw new Error(`Aucune portée n'a été reconnue sur ${file.name}.`);
       for (const p of outputs) pages.push({ name: path.basename(p), data: new Uint8Array(await readFile(p)) });
@@ -217,7 +259,7 @@ async function selfTest(win, file) {
   let code = 1;
   try {
     await new Promise((resolve) => win.webContents.once("did-finish-load", resolve));
-    log("Audiveris :", findAudiveris() ?? "introuvable");
+    log("Audiveris :", findAudiveris()?.command ?? "introuvable");
     const data = await readFile(file);
     const result = await win.webContents.executeJavaScript(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
