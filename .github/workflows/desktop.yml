@@ -51,6 +51,15 @@ jobs:
         if: matrix.target == 'linux'
         working-directory: desktop
         run: TRANSPOZ_SELFTEST="$PWD/test/partition.png" xvfb-run -a dist/linux-unpacked/transpoz --no-sandbox
+      - name: Vérification de l'application construite (Windows)
+        if: matrix.target == 'win'
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $env:TRANSPOZ_SELFTEST = "$PWD\test\partition.png"
+          $p = Start-Process -FilePath "dist\win-unpacked\TranspoZ.exe" -Wait -PassThru -RedirectStandardOutput selftest.txt
+          Get-Content selftest.txt
+          exit $p.ExitCode
       - uses: actions/upload-artifact@v4
         with:
           name: TranspoZ-${{ matrix.target }}
