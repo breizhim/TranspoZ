@@ -144,3 +144,61 @@ def test_rasterize_pdf(tmp_path):
 def test_cors_allows_external_site(client):
     r = client.get("/api/status", headers={"Origin": "https://breizhim.github.io"})
     assert r.headers.get("access-control-allow-origin") in ("*", "https://breizhim.github.io")
+
+
+class TimeEngine(FakeEngine):
+    """Moteur factice qui note le chiffrage imposé."""
+
+    def recognize(self, path, workdir, time=None):
+        self.calls.append(time)
+        return [page(NOTE)]
+
+
+def test_parse_time():
+    assert omr.parse_time("2/2") == (2, 2)
+    assert omr.parse_time(" 12 / 8 ") == (12, 8)
+    assert omr.parse_time("3/5") is None
+    assert omr.parse_time("auto") is None
+    assert omr.parse_time(None) is None
+
+
+def test_force_time_in_sheet_whole_and_pair():
+    xml, n = omr.force_time_in_sheet(
+        '<time-whole time-rational="3/4" shape="TIME_THREE_FOUR" glyph="292" id="294"><bounds x="1"/></time-whole>', 2, 2
+    )
+    assert n == 1
+    assert '<time-whole time-rational="2/2" shape="TIME_TWO_TWO" glyph="292"' in xml
+    xml, n = omr.force_time_in_sheet(
+        '<time-number side="TOP" value="9" shape="TIME_NINE" id="25"><time-number side="BOTTOM" value="8" shape="TIME_EIGHT" id="27">'
+        '<time-pair grade="0" abnormal="true" id="28"><time-pair time-rational="9/8" grade="0.8" id="29">', 6, 8
+    )
+    assert n == 1
+    assert 'side="TOP" value="6" shape="TIME_SIX"' in xml
+    assert 'time-rational="6/8" grade' in xml
+    assert 'abnormal="true" id="28"' in xml
+    cut = '<time-whole time-rational="2/2" shape="CUT_TIME" id="1">'
+    assert omr.force_time_in_sheet(cut, 2, 2)[0] == cut
+    assert "TIME_CUSTOM" in omr.force_time_in_sheet(cut, 7, 8)[0]
+
+
+def test_force_time_in_book(tmp_path):
+    import zipfile
+
+    book = tmp_path / "x.omr"
+    with zipfile.ZipFile(book, "w") as zf:
+        zf.writestr("book.xml", "<book/>")
+        zf.writestr("sheet#1/sheet#1.xml", '<sheet><time-whole time-rational="3/4" shape="TIME_THREE_FOUR"/></sheet>')
+    assert omr.force_time_in_book(book, 2, 2) == 1
+    with zipfile.ZipFile(book) as zf:
+        assert 'time-rational="2/2"' in zf.read("sheet#1/sheet#1.xml").decode()
+        assert zf.read("book.xml") == b"<book/>"
+
+
+def test_recognize_api_passes_time(client, monkeypatch):
+    engine = TimeEngine()
+    monkeypatch.setattr(omr, "get_engine", lambda name=None: engine)
+    files = {"files": ("p.png", b"\x89PNG\r\n\x1a\n" + b"0" * 20, "image/png")}
+    assert client.post("/api/recognize", files=files, data={"time": "2/2"}).status_code == 200
+    assert client.post("/api/recognize", files=files).status_code == 200
+    assert engine.calls == [(2, 2), None]
+    assert client.post("/api/recognize", files=files, data={"time": "3/5"}).status_code == 400

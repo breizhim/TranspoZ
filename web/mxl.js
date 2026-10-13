@@ -46,6 +46,19 @@ async function extract(bytes, entry) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+/** Contenu d'une archive zip : Map nom → octets (décompressés). */
+export async function readZip(bytes) {
+  const entries = readZipEntries(bytes);
+  const files = new Map();
+  for (const [name, entry] of entries) if (!name.endsWith("/")) files.set(name, await extract(bytes, entry));
+  return files;
+}
+
+/** Archive zip (sans compression) : [{ name, data }] → octets. */
+export function writeZip(files) {
+  return zip(files);
+}
+
 const ORIGINALS_DIR = "transpoz/original/";
 const SESSION_PATH = "transpoz/session.json";
 

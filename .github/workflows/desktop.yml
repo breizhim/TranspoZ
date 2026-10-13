@@ -1,0 +1,150 @@
+name: Application de bureau
+
+# Construit TranspoZ pour Linux (AppImage, .deb, .rpm) et Windows (installateur),
+# avec Audiveris embarqué. À chaque version (tag v*), les fichiers sont joints à la
+# publication GitHub ; sinon ils restent disponibles comme artefacts du workflow.
+
+on:
+  push:
+    tags: ["v*"]
+    # Aussi quand l'application ou l'interface change, pour vérifier les deux constructions.
+    branches: ["**"]
+    paths: ["desktop/**", "web/**", ".github/workflows/desktop.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+          - os: windows-latest
+            target: win
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            desktop/package-lock.json
+      - name: Outils de paquets (.rpm) et écran virtuel
+        if: matrix.target == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm xvfb
+      - run: npm ci
+      - name: Tests
+        if: matrix.target == 'linux'
+        run: npm test
+      - run: npm ci
+        working-directory: desktop
+      - name: Construction
+        run: npm run dist:${{ matrix.target }}
+        working-directory: desktop
+      - name: Dépendances du paquet .rpm à jour
+        if: matrix.target == 'linux'
+        working-directory: desktop
+        run: node scripts/linux-libs.mjs --check
+      - name: Vérification de l'application construite (reconnaissance d'une partition)
+        if: matrix.target == 'linux'
+        working-directory: desktop
+        run: TRANSPOZ_SELFTEST="$PWD/test/partition.png" xvfb-run -a dist/linux-unpacked/transpoz --no-sandbox
+      - name: Vérification après installation du paquet .deb (fichiers d'un paquet système)
+        if: matrix.target == 'linux'
+        working-directory: desktop
+        run: |
+          sudo apt-get install -y ./dist/*.deb
+          TRANSPOZ_SELFTEST="$PWD/test/partition.png" xvfb-run -a /opt/TranspoZ/transpoz --no-sandbox
+          # PDF, chiffrage imposé, impression et capture de la fenêtre (original affiché).
+          mkdir -p captures
+          TRANSPOZ_SELFTEST="$PWD/test/partition.pdf" TRANSPOZ_SELFTEST_TIME=4/4 \
+            TRANSPOZ_SELFTEST_SHOT="$PWD/captures/linux.png" TRANSPOZ_SELFTEST_PRINT="$PWD/captures/linux-impression.pdf" \
+            xvfb-run -a -s "-screen 0 1600x1000x24" /opt/TranspoZ/transpoz --no-sandbox
+      - name: Vérification après installation (Windows)
+        if: matrix.target == 'win'
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem dist\*.exe | Select-Object -First 1
+          Start-Process -FilePath $installer.FullName -ArgumentList "/S" -Wait
+          $exe = Join-Path $env:LOCALAPPDATA "Programs\TranspoZ\TranspoZ.exe"
+          if (-not (Test-Path $exe)) { Write-Error "Application installée introuvable : $exe"; exit 1 }
+          $env:TRANSPOZ_SELFTEST = "$PWD\test\partition.png"
+          $p = Start-Process -FilePath $exe -Wait -PassThru -RedirectStandardOutput installed.txt
+          Get-Content installed.txt
+          if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+          # PDF, chiffrage imposé, impression et capture de la fenêtre (original affiché).
+          New-Item -ItemType Directory -Force captures | Out-Null
+          $env:TRANSPOZ_SELFTEST = "$PWD\test\partition.pdf"
+          $env:TRANSPOZ_SELFTEST_TIME = "4/4"
+          $env:TRANSPOZ_SELFTEST_SHOT = "$PWD\captures\windows.png"
+          $env:TRANSPOZ_SELFTEST_PRINT = "$PWD\captures\windows-impression.pdf"
+          $p = Start-Process -FilePath $exe -Wait -PassThru -RedirectStandardOutput installed-pdf.txt
+          Get-Content installed-pdf.txt
+          exit $p.ExitCode
+      - name: Vérification de l'application construite (Windows)
+        if: matrix.target == 'win'
+        working-directory: desktop
+        shell: pwsh
+        run: |
+          $env:TRANSPOZ_SELFTEST = "$PWD\test\partition.png"
+          $p = Start-Process -FilePath "dist\win-unpacked\TranspoZ.exe" -Wait -PassThru -RedirectStandardOutput selftest.txt
+          Get-Content selftest.txt
+          exit $p.ExitCode
+      - uses: actions/upload-artifact@v4
+        with:
+          name: captures-${{ matrix.target }}
+          path: desktop/captures/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TranspoZ-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            desktop/dist/*.AppImage
+            desktop/dist/*.deb
+            desktop/dist/*.rpm
+            desktop/dist/*.exe
+      - name: Publication
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(desktop/dist/*.AppImage desktop/dist/*.deb desktop/dist/*.rpm desktop/dist/*.exe)
+          gh release create "$GITHUB_REF_NAME" --title "TranspoZ ${GITHUB_REF_NAME#v}" --notes "Voir le README." 2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" "${files[@]}" --clobber
+
+  # Le paquet .rpm dans les conditions réelles : installation par dnf sur Fedora,
+  # réinstallation (le lien /usr/bin/transpoz doit survivre), reconnaissance, désinstallation.
+  fedora-rpm:
+    needs: build
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: TranspoZ-linux
+          path: paquets
+      - name: Installation
+        run: |
+          dnf install -y ./paquets/*.rpm xorg-x11-server-Xvfb xorg-x11-xauth which
+          test -e /usr/bin/transpoz
+      - name: Réinstallation (le lien /usr/bin/transpoz doit rester)
+        run: |
+          dnf reinstall -y ./paquets/*.rpm
+          test -e /usr/bin/transpoz || { echo "Lien /usr/bin/transpoz supprimé par la réinstallation"; exit 1; }
+      - name: Reconnaissance avec l'application installée
+        run: TRANSPOZ_SELFTEST="$PWD/desktop/test/partition.png" xvfb-run -a transpoz --no-sandbox
+      - name: Désinstallation (le lien disparaît)
+        run: |
+          dnf remove -y transpoz-desktop
+          test ! -e /usr/bin/transpoz
