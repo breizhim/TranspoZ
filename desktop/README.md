@@ -20,6 +20,8 @@ Télécharger le fichier de la dernière version (page *Releases* du dépôt) :
   pour les PDF et les images, lance l'Audiveris embarqué ; la fusion des pages se fait
   dans l'interface (`web/merge.js`). Toute évolution de `web/` profite donc aux deux versions.
 - `preload.cjs` expose ce pont à l'interface (`window.transpozDesktop`).
+- Chiffrage imposé (option de l'interface) : Audiveris s'arrête après l'étape HEADERS, le chiffrage est
+  remplacé dans son projet `.omr` (`web/omr-time.js`, même règle que `server/omr.py`), puis il termine.
 - La lecture de texte (OCR) d'Audiveris est désactivée (`TESSDATA_PREFIX` vide) : elle
   ajoutait des textes incohérents et faisait perdre des nuances.
 

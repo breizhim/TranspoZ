@@ -129,6 +129,8 @@ button.link { border: none; background: none; color: var(--accent); padding: 4px
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+.omr-time { margin-top: 8px; }
+.omr-time .hint { margin: 4px 0 0; }
 .part-name-fields { display: flex; flex-direction: column; gap: 6px; }
 #part-names .hint { margin: 4px 0 0; }
 .hint { margin: 0 0 10px; font-size: 13px; color: var(--muted); }

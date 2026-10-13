@@ -45,6 +45,7 @@ const ui = {
   layoutBtn: $("layout-btn"),
   views: $("views"),
   zoom: $("zoom"),
+  omrTime: $("omr-time"),
   partNames: $("part-names"),
   partNameFields: $("part-name-fields"),
   spacing: $("spacing"),
@@ -403,10 +404,14 @@ const NO_OMR_MESSAGE =
   "La reconnaissance des PDF et images nécessite un serveur TranspoZ, non disponible ici. " +
   "Importez un fichier MusicXML (exportable depuis MuseScore, Finale, Sibelius…) ou utilisez une instance avec serveur.";
 
+// Chiffrage imposé à la reconnaissance (« 2/2 »…), ou null pour le laisser lire.
+const forcedTime = () => (ui.omrTime.value === "auto" ? null : ui.omrTime.value);
+
 async function recognizeOnServer(files) {
   if (desktop) return recognizeInDesktopApp(files);
   const form = new FormData();
   for (const f of files) form.append("files", f, f.name);
+  if (forcedTime()) form.append("time", forcedTime());
   const res = await fetch(apiUrl("api/recognize"), { method: "POST", body: form });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.detail || `Erreur serveur (${res.status})`);
@@ -446,10 +451,23 @@ function attachOriginals(fileList) {
   setStatus(`Original joint : ${state.originals.map((o) => o.file.name).join(", ")}. Il sera gardé dans la relecture enregistrée (💾).`);
 }
 
+// Filet de sécurité du chiffrage imposé : si la reconnaissance n'a trouvé aucun
+// chiffrage (ou un autre, avec oemer), il est écrit au début de la partition.
+function withForcedTime(xml) {
+  const time = forcedTime();
+  if (!time) return xml;
+  const [beats, beatType] = time.split("/").map(Number);
+  const doc = new DOMParser().parseFromString(xml, "application/xml");
+  const first = editor.analyzeScore(doc).measures.find((m) => m.part === 0 && m.index === 0);
+  if (first?.time && first.time.beats === beats && first.time.beatType === beatType) return xml;
+  editor.setTimeAt(doc, 0, beats, beatType);
+  return new XMLSerializer().serializeToString(doc);
+}
+
 // Même résultat que le serveur : une partition MusicXML par page, fusionnées.
 async function recognizeInDesktopApp(files) {
   const input = await Promise.all(files.map(async (f) => ({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) })));
-  const result = await desktop.recognize(input);
+  const result = await desktop.recognize(input, { time: forcedTime() });
   if (result.error) throw new Error(result.error);
   const scores = await Promise.all(result.pages.map((p) => readMusicXML(p.data)));
   const musicxml = mergeScores(scores);
@@ -481,7 +499,7 @@ async function handleFiles(fileList) {
     const fallbackTitle = files[0].name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ");
     if (!(server ?? (await checkServer())).reachable) throw new Error(NO_OMR_MESSAGE);
     const body = await recognizeOnServer(files);
-    await loadSource(body.musicxml, body.title, fallbackTitle);
+    await loadSource(withForcedTime(body.musicxml), body.title, fallbackTitle);
     const engine = body.engine ? ` avec ${body.engine}` : "";
     setStatus(`Partition chargée${engine}. Comparez-la à l'original pour vérifier la reconnaissance.`);
   } catch (err) {

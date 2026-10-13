@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { readMusicXML, readScoreFile, writeScoreFile } from "../web/mxl.js";
+import { readMusicXML, readScoreFile, writeScoreFile, readZip, writeZip } from "../web/mxl.js";
 
 const SAMPLE = readFileSync(new URL("../web/samples/au-clair-de-la-lune.musicxml", import.meta.url), "utf8");
 
@@ -70,4 +70,14 @@ print(z.read("META-INF/container.xml").decode().count("score.musicxml"))
 `, path]).toString().trim().split("\n");
   assert.equal(out[0], "mimetype META-INF/container.xml score.musicxml transpoz/original/p.pdf transpoz/session.json");
   assert.equal(out[1], "1");
+});
+
+test("archives zip : écriture puis lecture (projets Audiveris)", async () => {
+  const files = [
+    { name: "book.xml", data: new TextEncoder().encode("<book/>") },
+    { name: "sheet#1/sheet#1.xml", data: new TextEncoder().encode('<sheet><time-whole time-rational="2/2"/></sheet>') },
+  ];
+  const back = await readZip(writeZip(files));
+  assert.deepEqual([...back.keys()], ["book.xml", "sheet#1/sheet#1.xml"]);
+  assert.equal(new TextDecoder().decode(back.get("sheet#1/sheet#1.xml")), '<sheet><time-whole time-rational="2/2"/></sheet>');
 });

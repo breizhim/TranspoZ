@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from pathlib import Path
 
 from .musicxml import MusicXMLError, merge_scores, read_musicxml
@@ -67,8 +68,11 @@ class Engine:
     def available(self) -> bool:  # pragma: no cover - dépend de l'installation
         raise NotImplementedError
 
-    def recognize(self, path: Path, workdir: Path) -> list[str]:
-        """Reconnaît un fichier (PDF ou image) et retourne un MusicXML par page/mouvement."""
+    def recognize(self, path: Path, workdir: Path, time: tuple[int, int] | None = None) -> list[str]:
+        """Reconnaît un fichier (PDF ou image) et retourne un MusicXML par page/mouvement.
+
+        ``time`` (temps, unité), facultatif : chiffrage imposé à la reconnaissance.
+        """
         raise NotImplementedError
 
 
@@ -86,10 +90,20 @@ class AudiverisEngine(Engine):
     def available(self) -> bool:
         return bool(self.cmd)
 
-    def recognize(self, path: Path, workdir: Path) -> list[str]:
+    def recognize(self, path: Path, workdir: Path, time: tuple[int, int] | None = None) -> list[str]:
         outdir = workdir / f"{path.stem}-audiveris"
         outdir.mkdir()
-        _run([self.cmd, "-batch", "-export", "-output", str(outdir), "--", str(path)], cwd=workdir)
+        if time:
+            # Arrêt après la lecture des débuts de portée, chiffrage remplacé dans le
+            # projet Audiveris, puis fin de l'analyse (exportée à côté du projet).
+            _run([self.cmd, "-batch", "-save", "-step", "HEADERS", "-output", str(outdir), "--", str(path)], cwd=workdir)
+            books = sorted(outdir.rglob("*.omr"))
+            if not books:
+                raise OMRError("Aucune portée n'a été reconnue (Audiveris n'a produit aucun projet).")
+            force_time_in_book(books[0], *time)
+            _run([self.cmd, "-batch", "-export", "-output", str(outdir), "--", str(books[0])], cwd=workdir)
+        else:
+            _run([self.cmd, "-batch", "-export", "-output", str(outdir), "--", str(path)], cwd=workdir)
         outputs = sorted(
             [p for p in outdir.rglob("*") if p.suffix.lower() in (".mxl", ".xml", ".musicxml")],
             key=_natural_key,
@@ -97,6 +111,86 @@ class AudiverisEngine(Engine):
         if not outputs:
             raise OMRError("Aucune portée n'a été reconnue (Audiveris n'a produit aucun fichier).")
         return [read_musicxml(p.read_bytes()) for p in outputs]
+
+
+# ---------------------------------------------------------------------------
+# Chiffrage imposé (même transformation que web/omr-time.js)
+# ---------------------------------------------------------------------------
+
+NUMBER_SHAPES = {
+    0: "TIME_ZERO", 1: "TIME_ONE", 2: "TIME_TWO", 3: "TIME_THREE", 4: "TIME_FOUR", 5: "TIME_FIVE",
+    6: "TIME_SIX", 7: "TIME_SEVEN", 8: "TIME_EIGHT", 9: "TIME_NINE", 12: "TIME_TWELVE", 16: "TIME_SIXTEEN",
+}
+WHOLE_SHAPES = {
+    "2/2": "TIME_TWO_TWO", "2/4": "TIME_TWO_FOUR", "3/4": "TIME_THREE_FOUR", "4/4": "TIME_FOUR_FOUR",
+    "5/4": "TIME_FIVE_FOUR", "6/4": "TIME_SIX_FOUR", "3/8": "TIME_THREE_EIGHT", "6/8": "TIME_SIX_EIGHT",
+    "12/8": "TIME_TWELVE_EIGHT",
+}
+TIME_SYMBOLS = {"COMMON_TIME": "4/4", "CUT_TIME": "2/2"}
+
+
+def parse_time(text: str | None) -> tuple[int, int] | None:
+    """« 2/2 » → (2, 2) ; None si vide ou invalide."""
+    m = re.fullmatch(r"\s*(\d{1,2})\s*/\s*(\d{1,2})\s*", text or "")
+    if not m:
+        return None
+    beats, beat_type = int(m.group(1)), int(m.group(2))
+    return (beats, beat_type) if beats > 0 and beat_type in (1, 2, 4, 8, 16, 32) else None
+
+
+def _set_attr(tag: str, name: str, value) -> str:
+    if re.search(rf'\s{name}="[^"]*"', tag):
+        return re.sub(rf'(\s{name}=)"[^"]*"', lambda m: f'{m.group(1)}"{value}"', tag, count=1)
+    return re.sub(r"^<([\w-]+)", lambda m: f'<{m.group(1)} {name}="{value}"', tag, count=1)
+
+
+def force_time_in_sheet(xml: str, beats: int, beat_type: int) -> tuple[str, int]:
+    """Remplace les chiffrages d'une page Audiveris (sheet#N.xml) ; retourne (xml, nombre modifié)."""
+    rational = f"{beats}/{beat_type}"
+    count = 0
+
+    def whole(m: re.Match) -> str:
+        nonlocal count
+        count += 1
+        tag = m.group(0)
+        shape = (re.search(r'\sshape="([A-Z_]+)"', tag) or [None, None])[1]
+        keep = TIME_SYMBOLS.get(shape) == rational
+        tag = _set_attr(tag, "time-rational", rational)
+        return _set_attr(tag, "shape", shape if keep else WHOLE_SHAPES.get(rational, "TIME_CUSTOM"))
+
+    def pair(m: re.Match) -> str:
+        nonlocal count
+        tag = m.group(0)
+        if not re.search(r'\stime-rational="', tag):
+            return tag  # paire écartée par Audiveris
+        count += 1
+        return _set_attr(tag, "time-rational", rational)
+
+    def number(m: re.Match) -> str:
+        tag = m.group(0)
+        value = beats if ' side="TOP"' in tag else beat_type if ' side="BOTTOM"' in tag else None
+        if value is None:
+            return tag
+        return _set_attr(_set_attr(tag, "value", value), "shape", NUMBER_SHAPES.get(value, "TIME_CUSTOM"))
+
+    xml = re.sub(r"<time-whole\b[^>]*>", whole, xml)
+    xml = re.sub(r"<time-pair\b[^>]*>", pair, xml)
+    xml = re.sub(r"<time-number\b[^>]*>", number, xml)
+    return xml, count
+
+
+def force_time_in_book(book: Path, beats: int, beat_type: int) -> int:
+    """Applique le chiffrage à toutes les pages d'un projet Audiveris (.omr, archive zip)."""
+    with zipfile.ZipFile(book) as zf:
+        entries = [(info, zf.read(info.filename)) for info in zf.infolist()]
+    count = 0
+    with zipfile.ZipFile(book, "w", zipfile.ZIP_DEFLATED) as zf:
+        for info, data in entries:
+            if re.fullmatch(r"sheet#\d+/sheet#\d+\.xml", info.filename):
+                text, n = force_time_in_sheet(data.decode("utf-8"), beats, beat_type)
+                data, count = text.encode("utf-8"), count + n
+            zf.writestr(info, data)
+    return count
 
 
 class OemerEngine(Engine):
@@ -108,7 +202,8 @@ class OemerEngine(Engine):
     def available(self) -> bool:
         return bool(self.cmd)
 
-    def recognize(self, path: Path, workdir: Path) -> list[str]:
+    def recognize(self, path: Path, workdir: Path, time: tuple[int, int] | None = None) -> list[str]:
+        # oemer ne permet pas d'imposer le chiffrage : il est ajouté après coup par l'interface.
         images = rasterize_pdf(path, workdir) if path.suffix.lower() == ".pdf" else [path]
         results = []
         for image in images:
@@ -165,8 +260,13 @@ def detect_kind(filename: str, data: bytes) -> str:
     raise OMRError(f"Format de fichier non reconnu : {filename}")
 
 
-def recognize_files(files: list[tuple[str, bytes]], engine: Engine | None = None) -> tuple[str, dict]:
-    """Transforme une liste de fichiers (dans l'ordre des pages) en un seul MusicXML."""
+def recognize_files(
+    files: list[tuple[str, bytes]], engine: Engine | None = None, time: tuple[int, int] | None = None
+) -> tuple[str, dict]:
+    """Transforme une liste de fichiers (dans l'ordre des pages) en un seul MusicXML.
+
+    ``time`` : chiffrage (temps, unité) imposé à la reconnaissance, facultatif.
+    """
     if not files:
         raise OMRError("Aucun fichier reçu.")
     scores: list[str] = []
@@ -192,7 +292,7 @@ def recognize_files(files: list[tuple[str, bytes]], engine: Engine | None = None
             suffix = Path(filename).suffix.lower() or (".pdf" if kind == "pdf" else ".png")
             safe = workdir / f"page{index:03d}{suffix}"
             safe.write_bytes(data)
-            scores.extend(engine.recognize(safe, workdir))
+            scores.extend(engine.recognize(safe, workdir, time=time) if time else engine.recognize(safe, workdir))
     try:
         merged = merge_scores(scores)
     except MusicXMLError as exc:

@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -48,12 +48,16 @@ def status() -> dict:
 
 
 @app.post("/api/recognize")
-def recognize(files: list[UploadFile] = File(...)) -> dict:
+def recognize(files: list[UploadFile] = File(...), time: str | None = Form(None)) -> dict:
     """Reconnaît une partition (PDF, JPG, PNG — ou MusicXML déjà prêt).
 
     Plusieurs fichiers peuvent être envoyés : ils sont traités comme des pages
-    successives du même morceau.
+    successives du même morceau. ``time`` (ex. « 2/2 ») impose le chiffrage à la
+    reconnaissance, quand Audiveris le lit mal.
     """
+    forced_time = omr.parse_time(time)
+    if time and time != "auto" and forced_time is None:
+        raise HTTPException(400, f"Chiffrage invalide : {time}")
     if len(files) > MAX_FILES:
         raise HTTPException(413, f"{MAX_FILES} fichiers au maximum.")
     payload: list[tuple[str, bytes]] = []
@@ -67,7 +71,7 @@ def recognize(files: list[UploadFile] = File(...)) -> dict:
             raise HTTPException(400, f"Fichier vide : {f.filename}")
         payload.append((f.filename or "partition", data))
     try:
-        musicxml, info = omr.recognize_files(payload)
+        musicxml, info = omr.recognize_files(payload, time=forced_time)
     except omr.OMRError as exc:
         raise HTTPException(422, str(exc)) from exc
     try:

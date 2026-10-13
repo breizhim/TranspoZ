@@ -28,6 +28,25 @@
         </label>
         <button type="button" class="link" id="sample-btn">Essayer avec un exemple</button>
 
+        <div class="field omr-time">
+          <label for="omr-time">Chiffrage (aide à la reconnaissance)</label>
+          <select id="omr-time">
+            <option value="auto" selected>Automatique (lu sur la partition)</option>
+            <option value="2/2">2/2 (¢)</option>
+            <option value="2/4">2/4</option>
+            <option value="3/4">3/4</option>
+            <option value="4/4">4/4 (C)</option>
+            <option value="5/4">5/4</option>
+            <option value="6/4">6/4</option>
+            <option value="3/8">3/8</option>
+            <option value="6/8">6/8</option>
+            <option value="9/8">9/8</option>
+            <option value="12/8">12/8</option>
+          </select>
+          <p class="hint">À choisir avant de déposer une partition si la reconnaissance se trompe de
+            chiffrage (notes manquantes en fin de mesure).</p>
+        </div>
+
         <div class="status" id="status" role="status" aria-live="polite"></div>
 
         <div class="field">

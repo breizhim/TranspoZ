@@ -12,7 +12,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const TIMEOUT_MS = 10 * 60 * 1000;
@@ -27,6 +27,11 @@ const WEB_ROOTS = app.isPackaged
   ? [path.join(process.resourcesPath, "web")]
   : [path.join(here, "..", "web")];
 const OSMD_DEV = path.join(here, "..", "node_modules", "opensheetmusicdisplay", "build");
+
+// Modules partagés avec l'interface : archives zip, chiffrage imposé à la reconnaissance.
+const webModule = (name) => import(pathToFileURL(path.join(WEB_ROOTS[0], name)).href);
+const { readZip, writeZip } = await webModule("mxl.js");
+const { forceTimeInSheet, parseTime } = await webModule("omr-time.js");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -169,11 +174,28 @@ async function listOutputs(dir) {
   return found.sort((a, b) => naturalKey(a).localeCompare(naturalKey(b)));
 }
 
+// Applique le chiffrage à toutes les pages d'un projet Audiveris (.omr, archive zip).
+async function forceTimeInBook(book, time) {
+  const entries = await readZip(new Uint8Array(await readFile(book)));
+  const files = [];
+  for (const [name, data] of entries) {
+    if (/^sheet#\d+\/sheet#\d+\.xml$/.test(name)) {
+      const { xml } = forceTimeInSheet(new TextDecoder().decode(data), time);
+      files.push({ name, data: new TextEncoder().encode(xml) });
+    } else files.push({ name, data });
+  }
+  await writeFile(book, writeZip(files));
+}
+
 /**
  * Reconnaît les fichiers (pages, dans l'ordre) : renvoie les fichiers MusicXML
  * produits par Audiveris, une ou plusieurs pages par fichier.
+ * options.time (« 2/2 »…) impose le chiffrage : Audiveris s'arrête après la lecture
+ * des débuts de portée, le chiffrage est remplacé dans son projet, puis il termine
+ * (même déroulement que le serveur, server/omr.py).
  */
-async function recognize(files) {
+async function recognize(files, options = {}) {
+  const time = parseTime(options.time);
   const audiveris = findAudiveris();
   if (!audiveris) return { error: "Audiveris est introuvable dans l'application." };
   const work = await mkdtemp(path.join(tmpdir(), "transpoz-"));
@@ -189,7 +211,16 @@ async function recognize(files) {
       await writeFile(input, file.data);
       const out = path.join(work, `out${index}`);
       await mkdir(out);
-      await run(audiveris.command, [...audiveris.prefix, "-batch", "-export", "-output", out, "--", input], { cwd: work, env });
+      const audiverisRun = (args) => run(audiveris.command, [...audiveris.prefix, "-batch", ...args], { cwd: work, env });
+      if (time) {
+        await audiverisRun(["-save", "-step", "HEADERS", "-output", out, "--", input]);
+        const book = (await readdir(out, { recursive: true })).find((f) => f.endsWith(".omr"));
+        if (!book) throw new Error(`Aucune portée n'a été reconnue sur ${file.name}.`);
+        await forceTimeInBook(path.join(out, book), time);
+        await audiverisRun(["-export", "-output", out, "--", path.join(out, book)]);
+      } else {
+        await audiverisRun(["-export", "-output", out, "--", input]);
+      }
       const outputs = await listOutputs(out);
       if (!outputs.length) throw new Error(`Aucune portée n'a été reconnue sur ${file.name}.`);
       for (const p of outputs) pages.push({ name: path.basename(p), data: new Uint8Array(await readFile(p)) });
@@ -203,7 +234,7 @@ async function recognize(files) {
 }
 
 ipcMain.handle("transpoz:status", () => ({ engine: findAudiveris() ? "audiveris" : null }));
-ipcMain.handle("transpoz:recognize", (_event, files) => recognize(files));
+ipcMain.handle("transpoz:recognize", (_event, files, options) => recognize(files, options));
 
 // ---------------------------------------------------------------------------
 // Fenêtre
@@ -264,6 +295,8 @@ async function selfTest(win, file) {
     const result = await win.webContents.executeJavaScript(`(async () => {
       const wait = (ms) => new Promise((r) => setTimeout(r, ms));
       const file = new File([new Uint8Array(${JSON.stringify([...data])})], ${JSON.stringify(path.basename(file))});
+      const time = ${JSON.stringify(process.env.TRANSPOZ_SELFTEST_TIME ?? "auto")};
+      document.getElementById("omr-time").value = time;
       const dt = new DataTransfer(); dt.items.add(file);
       document.getElementById("dropzone").dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
       const t0 = Date.now();

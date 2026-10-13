@@ -37,6 +37,7 @@ web/                 interface (HTML/CSS/JS, sans framework)
   player.js          lecture audio (synthé trompette Web Audio)
   editor.js          analyse des mesures et opérations de correction (JS pur, testé sous Node)
   merge.js           fusion des pages reconnues (application de bureau ; même règle que le serveur)
+  omr-time.js        chiffrage imposé à la reconnaissance (application de bureau ; même règle que le serveur)
   config.js          adresse du serveur de reconnaissance
 server/              API FastAPI
   main.py            POST /api/recognize, GET /api/status, fichiers statiques
@@ -57,6 +58,8 @@ La reconnaissance est déléguée à un moteur libre, installé sur le serveur :
 | [oemer](https://github.com/BreezeWhite/oemer) | Plus tolérant avec les photos de téléphone | `pip install oemer` (modèles téléchargés au 1er usage) |
 
 `OMR_ENGINE=auto` (défaut) utilise Audiveris s'il est présent, sinon oemer. On peut forcer `OMR_ENGINE=audiveris` ou `OMR_ENGINE=oemer`.
+
+Si le chiffrage est mal lu (notes manquantes en fin de mesure : Audiveris retire les notes en trop pour respecter le chiffrage qu'il a cru lire), choisir le bon dans « Chiffrage (aide à la reconnaissance) » avant de déposer la partition : Audiveris est arrêté après la lecture des débuts de portée, le chiffrage est remplacé dans son projet, puis il termine (paramètre `time` de `/api/recognize`, ex. `2/2`).
 
 Aucune reconnaissance n'est parfaite : les partitions manuscrites, les photos floues ou de travers donnent des erreurs. Pour de meilleurs résultats, utilisez un PDF d'origine ou un scan à 300 dpi, bien droit. Le bouton « Original » permet de comparer, et le MusicXML exporté peut être corrigé dans MuseScore puis réimporté.
 
