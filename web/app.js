@@ -48,8 +48,9 @@ const ui = {
   spacing: $("spacing"),
   spacingLabel: $("spacing-label"),
   tightMargins: $("tight-margins"),
-  pageViewBtn: $("page-view"),
-  pageCount: $("page-count"),
+  zoomLabel: $("zoom-label"),
+  fitPages: $("fit-pages"),
+  fitInfo: $("fit-info"),
   playBtn: $("play-btn"),
   stopBtn: $("stop-btn"),
   tempo: $("tempo"),
@@ -167,11 +168,6 @@ function applyLayoutRules(osmd) {
   ui.spacingLabel.textContent = `${Math.round(factor * 100)} %`;
 }
 
-function updatePageCount() {
-  const pages = state.osmd?.GraphicSheet?.MusicPages.length ?? 0;
-  ui.pageCount.textContent = state.pageFormat === "Endless" || !pages ? "" : `${pages} page${pages > 1 ? "s" : ""} A4`;
-}
-
 // Nouveau rendu (même partition), en gardant la position de défilement.
 function relayout() {
   if (!state.osmd || !state.sourceXml || state.rendering) return;
@@ -181,7 +177,6 @@ function relayout() {
   decorate();
   restoreScroll(scroll, { proportional: true });
   if (state.cursorTimes) state.osmd.cursor?.update();
-  updatePageCount();
 }
 
 // Demi-tons et octaves → intervalle (une octave reste une octave, pas une septième augmentée).
@@ -292,9 +287,8 @@ async function update() {
       decorate();
       restoreScroll(scroll);
     } while (state.dirty);
-    for (const b of [ui.printBtn, ui.downloadBtn, ui.saveBtn, ui.attachBtn, ui.playBtn, ui.stopBtn, ui.pageViewBtn]) b.disabled = false;
+    for (const b of [ui.printBtn, ui.downloadBtn, ui.saveBtn, ui.attachBtn, ui.playBtn, ui.stopBtn, ui.fitPages]) b.disabled = false;
     showPartNames();
-    updatePageCount();
     ui.editor.hidden = false;
   } catch (err) {
     console.error(err);
@@ -353,6 +347,9 @@ function resetForNewScore() {
   ui.score.scrollTop = 0; // nouvelle partition : on repart du début
   state.appliedShift = 0;
   ui.keyPref.value = "auto";
+  if (ui.fitPages.value) setZoom(1); // zoom calculé pour la partition précédente
+  ui.fitPages.value = "";
+  ui.fitInfo.textContent = "";
   ui.score.scrollLeft = 0;
   updateHistoryButtons();
 }
@@ -1823,41 +1820,101 @@ new ResizeObserver(() => {
 // Impression et export
 // ---------------------------------------------------------------------------
 
-async function renderWithFormat(format) {
-  state.pageFormat = format;
-  const osmd = await getOSMD();
-  osmd.setOptions({ pageFormat: format });
-  applyLayoutRules(osmd);
-  osmd.render();
-  ui.score.classList.toggle("page-view", format !== "Endless");
-  decorate();
-  updatePageCount();
+// Largeur utile d'une page A4 imprimée (190 mm, voir @page dans style.css) : à l'impression,
+// la mise en page ne dépend ni de la fenêtre ni du volet, et le zoom y a le même sens qu'à l'écran.
+const PRINT_WIDTH = "190mm";
+
+function usePrintLayout(on) {
+  state.pageFormat = on ? "A4_P" : "Endless";
+  $("score-canvas").style.width = on ? PRINT_WIDTH : "";
+  state.osmd.setOptions({ pageFormat: state.pageFormat });
+  applyLayoutRules(state.osmd);
 }
 
-// Aperçu A4 : la partition telle qu'elle sera imprimée (pages), toujours modifiable.
-async function setPageView(on) {
-  ui.pageViewBtn.setAttribute("aria-pressed", String(on));
-  if (!state.sourceXml) return;
-  const scroll = scrollPosition();
-  hideCursor();
-  state.cursorTimes = null;
-  await renderWithFormat(on ? "A4_P" : "Endless");
+function setZoom(zoom) {
+  ui.zoom.value = String(zoom);
+  ui.zoomLabel.textContent = `${Math.round(zoom * 100)} %`;
+}
+
+const pagesLabel = (n) => `${n} page${n > 1 ? "s" : ""}`;
+
+// Plus grand zoom (en %) qui fait tenir la partition sur `target` pages : à ce zoom,
+// elles sont aussi remplies que possible. À appeler en mise en page d'impression.
+function findFitZoom(target) {
+  const pagesAt = (percent) => {
+    state.osmd.zoom = percent / 100;
+    state.osmd.render();
+    return state.osmd.GraphicSheet.MusicPages.length;
+  };
+  let lo = Math.round(Number(ui.zoom.min) * 100);
+  let hi = Math.round(Number(ui.zoom.max) * 100);
+  if (pagesAt(hi) <= target) return hi;
+  if (pagesAt(lo) > target) return lo;
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (pagesAt(mid) <= target) lo = mid;
+    else hi = mid;
+  }
+  return lo;
+}
+
+// Ajuste le zoom pour le nombre de pages demandé (sans effet si le champ est vide).
+// Reste en mise en page d'impression, rendue au zoom retenu.
+function fitToPages() {
+  const target = Math.round(Number(ui.fitPages.value));
+  if (ui.fitPages.value === "" || !(target >= 1)) {
+    ui.fitPages.value = "";
+    ui.fitInfo.textContent = "";
+    return;
+  }
+  ui.fitPages.value = String(target);
+  const percent = findFitZoom(target);
+  setZoom(percent / 100);
+  state.osmd.zoom = percent / 100;
+  state.osmd.render();
+  const pages = state.osmd.GraphicSheet.MusicPages.length;
+  ui.fitInfo.textContent = pages === target
+    ? `${pagesLabel(pages)} au zoom ${percent} %.`
+    : pages > target
+      ? `Impossible : ${pagesLabel(pages)} au zoom minimal (${percent} %).`
+      : `Partition trop courte : ${pagesLabel(pages)} au zoom maximal (${percent} %).`;
+}
+
+function leavePrintLayout(scroll) {
+  usePrintLayout(false);
+  state.osmd.zoom = Number(ui.zoom.value);
+  state.osmd.render();
+  decorate();
   restoreScroll(scroll, { proportional: true });
 }
 
+async function applyFitPages() {
+  if (!state.sourceXml || state.rendering) return;
+  const scroll = scrollPosition();
+  await getOSMD();
+  hideCursor();
+  state.cursorTimes = null;
+  usePrintLayout(true);
+  fitToPages();
+  leavePrintLayout(scroll);
+}
+
+// La boîte d'impression du navigateur montre les pages. Le zoom est recalculé pour le
+// nombre de pages demandé : la partition, l'espacement ou les marges ont pu changer.
 async function print() {
+  if (state.rendering) return;
   pausePlayback();
   hideCursor();
-  const pageView = state.pageFormat !== "Endless";
-  if (pageView) {
-    window.print();
-    return;
-  }
   const scroll = scrollPosition();
-  await renderWithFormat("A4_P");
+  await getOSMD();
+  usePrintLayout(true);
+  state.osmd.zoom = Number(ui.zoom.value);
+  fitToPages();
+  if (!ui.fitPages.value) state.osmd.render();
+  decorate();
   const restore = () => {
     window.removeEventListener("afterprint", restore);
-    renderWithFormat("Endless").then(() => restoreScroll(scroll));
+    leavePrintLayout(scroll);
   };
   window.addEventListener("afterprint", restore);
   window.print();
@@ -1899,6 +1956,7 @@ async function saveReview() {
     zoom: Number(ui.zoom.value),
     spacing: Number(ui.spacing.value),
     tightMargins: ui.tightMargins.checked,
+    fitPages: ui.fitPages.value === "" ? null : Number(ui.fitPages.value),
   };
   const bytes = writeScoreFile(state.sourceXml, { originals, session });
   saveFile(new Blob([bytes], { type: "application/vnd.recordare.musicxml" }), `${session.title || "partition"} - relecture`, ".mxl");
@@ -1917,7 +1975,8 @@ async function restoreSession(session) {
   const r = session.region;
   state.region = r === null ? null : r && pos(r.start) && pos(r.end) ? { start: r.start, end: r.end } : "all";
   const within = (v, lo, hi) => Number.isFinite(Number(v)) && Number(v) >= lo && Number(v) <= hi;
-  if (within(session.zoom, 0.5, 1.6)) ui.zoom.value = String(session.zoom);
+  if (within(session.zoom, 0.25, 3)) setZoom(Number(session.zoom));
+  if (Number.isInteger(session.fitPages) && session.fitPages >= 1) ui.fitPages.value = String(session.fitPages);
   if (within(session.spacing, 0, 1.5)) ui.spacing.value = String(session.spacing);
   if (typeof session.tightMargins === "boolean") ui.tightMargins.checked = session.tightMargins;
   if (Number.isFinite(Number(session.tempo))) {
@@ -1968,15 +2027,18 @@ for (const b of ui.shiftButtons) {
 ui.keyPref.addEventListener("change", update);
 ui.spacing.addEventListener("input", relayout);
 ui.tightMargins.addEventListener("change", relayout);
-ui.pageViewBtn.addEventListener("click", () => setPageView(ui.pageViewBtn.getAttribute("aria-pressed") !== "true"));
+ui.fitPages.addEventListener("change", applyFitPages);
 ui.zoom.addEventListener("input", () => {
+  ui.zoomLabel.textContent = `${Math.round(Number(ui.zoom.value) * 100)} %`;
+  // Zoom choisi à la main : il remplace le nombre de pages demandé.
+  ui.fitPages.value = "";
+  ui.fitInfo.textContent = "";
   if (!state.osmd || !state.sourceXml) return;
   const scroll = scrollPosition();
   state.osmd.zoom = Number(ui.zoom.value);
   state.osmd.render();
   decorate();
   restoreScroll(scroll, { proportional: true });
-  updatePageCount();
   if (state.cursorTimes) state.osmd.cursor?.update();
 });
 ui.printBtn.addEventListener("click", print);

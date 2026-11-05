@@ -149,11 +149,6 @@ button.link { border: none; background: none; color: var(--accent); padding: 4px
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .actions .zoom { grid-column: 1 / -1; margin: 4px 0 0; }
 .actions .check { display: flex; align-items: center; gap: 6px; font-size: 13px; }
-.page-view { display: flex; align-items: center; gap: 10px; }
-.page-view .hint { margin: 0; }
-#page-view[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--surface); font-weight: 600; }
-.score.page-view { background: #e9e6df; }
-.score.page-view svg { display: block; margin: 0 auto 12px; background: #fff; box-shadow: 0 1px 6px rgb(0 0 0 / 18%); }
 #attach-btn { grid-column: 1 / -1; }
 
 .stage { min-width: 0; display: flex; flex-direction: column; gap: 16px; }

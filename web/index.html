@@ -86,18 +86,19 @@
                 title="Joindre le PDF ou les images d'origine, pour les afficher à côté et les garder dans la relecture">📎 Joindre l'original</button>
         <input type="file" id="attach-input" hidden multiple accept=".pdf,.jpg,.jpeg,.png,.tif,.tiff,application/pdf,image/*">
         <div class="field zoom">
-          <label for="zoom">Zoom</label>
-          <input type="range" id="zoom" min="0.5" max="1.6" step="0.05" value="1">
+          <label for="zoom">Zoom : <span id="zoom-label">100 %</span></label>
+          <input type="range" id="zoom" min="0.25" max="3" step="0.01" value="1">
         </div>
         <div class="field zoom">
           <label for="spacing">Espace entre les lignes : <span id="spacing-label">100 %</span></label>
           <input type="range" id="spacing" min="0" max="1.5" step="0.05" value="1">
         </div>
         <label class="check zoom"><input type="checkbox" id="tight-margins"> Marges de page réduites</label>
-        <div class="page-view zoom">
-          <button type="button" id="page-view" aria-pressed="false" disabled
-                  title="Afficher la partition en pages A4, comme à l'impression">📄 Aperçu A4</button>
-          <span id="page-count" class="hint"></span>
+        <div class="field zoom">
+          <label for="fit-pages">Remplir (pages A4)</label>
+          <input type="number" id="fit-pages" min="1" step="1" inputmode="numeric" placeholder="Zoom libre" disabled
+                 title="Ajuste le zoom pour que la partition remplisse ce nombre de pages à l'impression">
+          <p class="hint" id="fit-info"></p>
         </div>
       </section>
     </aside>

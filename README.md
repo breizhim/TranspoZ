@@ -17,7 +17,7 @@ Outil en ligne pour **transposer une partition** fournie en PDF ou en image (JPG
 - Changement de clé optionnel (ex. trombone en clé de fa → trompette en clé de sol).
 - Nom de l'instrument en début de portée modifiable ou supprimable (« Voice » mis par défaut par la reconnaissance, par exemple).
 - Affichage de l'original avec la partition retranscrite : deux volets fixes, chacun avec son propre défilement, l'un au-dessus de l'autre (par défaut) ou côte à côte (choix retenu par le navigateur).
-- Impression au format A4 (seule la partition est imprimée) ; « 📄 Aperçu A4 » montre les pages et leur nombre, à régler avec le zoom, l'espace entre les lignes et les marges réduites pour tout faire tenir sur une feuille.
+- Impression au format A4 (seule la partition est imprimée, la boîte d'impression montre les pages). « Remplir (pages A4) » : on saisit un nombre de pages et le zoom s'ajuste pour les remplir ; l'espace entre les lignes et les marges restent au choix.
 - Encart « Modification » au-dessus de la partition, avec des modes :
   - **Lecture** (par défaut) : un clic place la barre de lecture, la lecture part de là ;
   - **Notes** : clic sur une note pour changer sa durée (point compris), sa hauteur, ses altérations, ses articulations (piqué, tenuto, accent, marcato, très piqué, point d'orgue — entendues à la lecture), ses liaisons (prolongation ou expression), la supprimer ou la dupliquer ; ajout d'une note ou d'un silence entre deux notes (trait bleu au survol, hauteur selon la position de la souris) ; couper ou fusionner des mesures ;
