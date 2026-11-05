@@ -346,7 +346,7 @@ button.link { border: none; background: none; color: var(--accent); padding: 4px
 @media print {
   @page { size: A4; margin: 10mm; }
   body { background: #fff; }
-  .no-print, .tz-flag, .tz-region, .tz-region-mark { display: none !important; }
+  .no-print, .tz-flag, .tz-region, .tz-region-mark, [id^="cursorImg"] { display: none !important; }
   body { height: auto; overflow: visible; display: block; }
   .layout, .stage, .views { display: block; height: auto; padding: 0; }
   .score { border: none; border-radius: 0; overflow: visible !important; height: auto !important; }

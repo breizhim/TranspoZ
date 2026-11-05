@@ -1886,14 +1886,13 @@ function leavePrintLayout(scroll) {
   state.osmd.render();
   decorate();
   restoreScroll(scroll, { proportional: true });
+  if (state.cursorTimes) state.osmd.cursor?.update();
 }
 
 async function applyFitPages() {
   if (!state.sourceXml || state.rendering) return;
   const scroll = scrollPosition();
   await getOSMD();
-  hideCursor();
-  state.cursorTimes = null;
   usePrintLayout(true);
   fitToPages();
   leavePrintLayout(scroll);
@@ -1904,7 +1903,6 @@ async function applyFitPages() {
 async function print() {
   if (state.rendering) return;
   pausePlayback();
-  hideCursor();
   const scroll = scrollPosition();
   await getOSMD();
   usePrintLayout(true);
