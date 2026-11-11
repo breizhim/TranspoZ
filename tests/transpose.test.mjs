@@ -283,3 +283,22 @@ test("simplification : armure à 7 altérations remplacée, sélection respecté
   transposeScore(doc3, { simplify: true, region: { ...zone, start: { measure: 0, offset: 0 } } });
   assert.equal(doc3.getElementsByTagName("fifths")[0].textContent, "7");
 });
+
+test("simplification : sens de la mélodie (dièse en montant, bémol en descendant)", () => {
+  const run = (notes, fifths = 2) => {
+    const doc = parse(score([notes.map(([st, a]) => sNote(st, a, 4)).join("")], { fifths }));
+    transposeScore(doc, { simplify: true });
+    return pitches(doc).join(" ");
+  };
+  // Ré majeur (CABARET) : si → la♯ → la devient si♭ ; la → la♯ → si reste la♯.
+  assert.equal(run([["B", 0], ["A", 1], ["A", 0]]), "B4 Bb4 A4");
+  assert.equal(run([["A", 0], ["A", 1], ["B", 0]]), "A4 A#4 B4");
+  // Broderie ré♯ mi fa♯ mi ré♯ : les deux ré♯ restent identiques.
+  assert.equal(run([["D", 1], ["E", 0], ["F", 1], ["E", 0], ["D", 1]]), "D#4 E4 F#4 E4 D#4");
+  // Notes répétées : même écriture, d'après la note qui suit.
+  assert.equal(run([["D", 1], ["D", 1], ["D", 0]]), "Eb4 Eb4 D4");
+  // Do majeur : sol → sol♭ → fa en bémol, même si fa♯ est l'écriture habituelle.
+  assert.equal(run([["G", 0], ["F", 1], ["F", 0]], 0), "G4 Gb4 F4");
+  // Jamais de mi♯ pour monter vers fa♯ : fa ♮ gardé.
+  assert.equal(run([["F", 0], ["F", 1]]), "F4 F#4");
+});

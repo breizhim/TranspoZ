@@ -127,14 +127,20 @@ const CHROMATIC_DEGREES = {
   minor: { 1: 1, 4: 2, 6: 3, 9: 5, 11: 6 },
 };
 
+const pitchSemitone = ({ step, alter = 0, octave }) => octave * 12 + STEP_SEMITONES[STEPS.indexOf(step)] + alter;
+
 /**
  * Écriture conventionnelle d'une hauteur, à son identique (même son, octave comprise) :
- * la note de la gamme si elle en fait partie, sinon l'altération la plus courante dans
- * la tonalité, sans mi♯, si♯, fa♭, do♭ ni double altération (ex. la♯ → si♭ en Do).
+ * la note de la gamme si elle en fait partie ; sinon, une note suivie d'un demi-ton plus haut
+ * s'écrit en dièse, d'un demi-ton plus bas en bémol (la → la♯ → si, si → si♭ → la) ;
+ * à défaut, l'altération la plus courante dans la tonalité (ex. la♯ → si♭ en Do).
+ * Jamais de mi♯, si♯, fa♭, do♭ ni de double altération hors armure.
  * @param {number} fifths armure ; mode « minor » pour une tonalité mineure, sinon majeure
+ * @param {{next?:number|null}} [melody] écart en demi-tons avec la note suivante de la même
+ *        voix (suivante − cette note ; notes répétées sautées)
  */
-export function simplifyPitch({ step, alter = 0, octave }, fifths = 0, mode = null) {
-  const semitone = octave * 12 + STEP_SEMITONES[STEPS.indexOf(step)] + alter;
+export function simplifyPitch({ step, alter = 0, octave }, fifths = 0, mode = null, melody = {}) {
+  const semitone = pitchSemitone({ step, alter, octave });
   const pc = mod(semitone, 12);
   const spellings = STEPS.map((name, s) => {
     const a = mod(pc - STEP_SEMITONES[s] + 6, 12) - 6;
@@ -143,6 +149,10 @@ export function simplifyPitch({ step, alter = 0, octave }, fifths = 0, mode = nu
   const diatonic = spellings.find((p) => p.alter === keyAlter(fifths, p.step));
   if (diatonic) return diatonic;
   const usable = spellings.filter((p) => !AWKWARD.has(`${p.step}${p.alter}`));
+  // Sens de la mélodie : la note suivante, à un demi-ton, décide (dièse en montant, bémol en descendant).
+  const raised = (p) => p.alter > keyAlter(fifths, p.step);
+  const byMelody = Math.abs(melody.next) === 1 && usable.find((p) => raised(p) === melody.next > 0);
+  if (byMelody) return byMelody;
   const minor = mode === "minor";
   const tonicStep = mod(4 * fifths + (minor ? 5 : 0), 7);
   const tonicPc = mod(7 * fifths + (minor ? 9 : 0), 12);
@@ -349,6 +359,35 @@ function simplifyHarmony(harmony, fifths, mode) {
   return changed;
 }
 
+// Mélodie de chaque voix (portée + voix, sans les notes d'accord) : écart en demi-tons avec
+// la première note suivante différente (notes répétées sautées) ; un silence coupe la mélodie.
+// Écarts de la partition d'origine (même transposition pour les deux notes).
+function melodicNeighbours(part) {
+  const info = new Map();
+  const pending = new Map(); // voix → notes répétées en attente de la suivante
+  for (const measure of children(part, "measure")) {
+    for (const n of children(measure, "note")) {
+      if (child(n, "chord")) continue;
+      const line = `${childText(n, "staff") ?? "1"}|${childText(n, "voice") ?? "1"}`;
+      const pitchEl = child(n, "pitch");
+      if (!pitchEl) {
+        pending.delete(line);
+        continue;
+      }
+      const entry = { line, semitone: pitchSemitone(readPitch(pitchEl)), next: null };
+      const waiting = pending.get(line) ?? [];
+      if (waiting.length && waiting[0].semitone !== entry.semitone) {
+        for (const w of waiting) w.next = entry.semitone - w.semitone;
+        waiting.length = 0;
+      }
+      waiting.push(entry);
+      pending.set(line, waiting);
+      info.set(n, entry);
+    }
+  }
+  return info;
+}
+
 function firstKey(part) {
   const key = part.getElementsByTagName("key")[0];
   if (!key) return { fifths: 0, mode: null };
@@ -461,6 +500,8 @@ export function transposeScore(doc, options = {}) {
     const currentKey = (staff) => keyByStaff.get(staff) ?? keyByStaff.get("*");
     const currentMode = (staff) => (modeByStaff.has(staff) ? modeByStaff.get(staff) : modeByStaff.get("*"));
     const simplified = { notes: 0, chords: 0, keys: 0 };
+    const melody = simplify ? melodicNeighbours(part) : null;
+    const lastWritten = new Map(); // voix → dernière note écrite (pour les notes liées)
 
     children(part, "measure").forEach((measure, mi) => {
       const alterations = new Map();
@@ -543,7 +584,11 @@ export function transposeScore(doc, options = {}) {
           let pitch = transposePitch(readPitch(pitchEl), iv);
           let rewrite = !isIdentityInterval(iv);
           if (simplify && (!zone || inZone(start))) {
-            const simple = simplifyPitch(pitch, currentKey(staff), currentMode(staff));
+            const line = melody.get(el)?.line;
+            const tiedFrom = hasTieStop(el) && lastWritten.get(line);
+            const simple = tiedFrom && pitchSemitone(tiedFrom) === pitchSemitone(pitch)
+              ? tiedFrom // note liée : même écriture que la note de départ
+              : simplifyPitch(pitch, currentKey(staff), currentMode(staff), melody.get(el));
             if (!samePitch(simple, pitch)) {
               touched.add(`${staff}|${pitch.step}${pitch.octave}`).add(`${staff}|${simple.step}${simple.octave}`);
               pitch = simple;
@@ -552,6 +597,7 @@ export function transposeScore(doc, options = {}) {
             }
           }
           if (rewrite) writePitch(pitchEl, pitch);
+          if (melody?.has(el)) lastWritten.set(melody.get(el).line, pitch);
 
           const slot = `${staff}|${pitch.step}${pitch.octave}`;
           // Altérations à revoir : note réécrite, ou même nom de note qu'une note réécrite.
