@@ -112,6 +112,46 @@ export function keyAlter(fifths, step) {
   return 0;
 }
 
+// ---------------------------------------------------------------------------
+// Simplification de l'écriture (orthographe enharmonique)
+// ---------------------------------------------------------------------------
+
+// Écritures évitées hors armure : mi♯, si♯, fa♭, do♭ (les doubles altérations aussi).
+const AWKWARD = new Set(["E1", "B1", "F-1", "C-1"]);
+
+// Notes hors gamme : degré (0 = tonique) qui porte l'altération, selon l'écart en
+// demi-tons avec la tonique. Ce sont les altérations les plus courantes :
+// majeur ♯1, ♭3, ♯4, ♯5, ♭7 ; mineur ♭2, ♮3 (tierce picarde), ♯4, ♯6, ♯7 (sensible).
+const CHROMATIC_DEGREES = {
+  major: { 1: 0, 3: 2, 6: 3, 8: 4, 10: 6 },
+  minor: { 1: 1, 4: 2, 6: 3, 9: 5, 11: 6 },
+};
+
+/**
+ * Écriture conventionnelle d'une hauteur, à son identique (même son, octave comprise) :
+ * la note de la gamme si elle en fait partie, sinon l'altération la plus courante dans
+ * la tonalité, sans mi♯, si♯, fa♭, do♭ ni double altération (ex. la♯ → si♭ en Do).
+ * @param {number} fifths armure ; mode « minor » pour une tonalité mineure, sinon majeure
+ */
+export function simplifyPitch({ step, alter = 0, octave }, fifths = 0, mode = null) {
+  const semitone = octave * 12 + STEP_SEMITONES[STEPS.indexOf(step)] + alter;
+  const pc = mod(semitone, 12);
+  const spellings = STEPS.map((name, s) => {
+    const a = mod(pc - STEP_SEMITONES[s] + 6, 12) - 6;
+    return { step: name, alter: a, octave: (semitone - a - STEP_SEMITONES[s]) / 12 };
+  }).filter((p) => Math.abs(p.alter) <= 1);
+  const diatonic = spellings.find((p) => p.alter === keyAlter(fifths, p.step));
+  if (diatonic) return diatonic;
+  const usable = spellings.filter((p) => !AWKWARD.has(`${p.step}${p.alter}`));
+  const minor = mode === "minor";
+  const tonicStep = mod(4 * fifths + (minor ? 5 : 0), 7);
+  const tonicPc = mod(7 * fifths + (minor ? 9 : 0), 12);
+  const degree = CHROMATIC_DEGREES[minor ? "minor" : "major"][mod(pc - tonicPc, 12)];
+  return usable.find((p) => p.step === STEPS[mod(tonicStep + degree, 7)]) ?? usable[0];
+}
+
+const samePitch = (a, b) => a.step === b.step && a.alter === b.alter && a.octave === b.octave;
+
 const MAJOR_KEYS = ["Do♭", "Sol♭", "Ré♭", "La♭", "Mi♭", "Si♭", "Fa", "Do", "Sol", "Ré", "La", "Mi", "Si", "Fa♯", "Do♯"];
 const MINOR_KEYS = ["La♭", "Mi♭", "Si♭", "Fa", "Do", "Sol", "Ré", "La", "Mi", "Si", "Fa♯", "Do♯", "Sol♯", "Ré♯", "La♯"];
 
@@ -284,6 +324,31 @@ function transposeHarmony(harmony, interval) {
   }
 }
 
+// Accords (chiffrages) : fondamentale et basse réécrites comme les notes.
+function simplifyHarmony(harmony, fifths, mode) {
+  let changed = 0;
+  for (const [container, stepName, alterName] of [["root", "root-step", "root-alter"], ["bass", "bass-step", "bass-alter"]]) {
+    for (const c of children(harmony, container)) {
+      const stepEl = child(c, stepName);
+      if (!stepEl) continue;
+      const alterEl = child(c, alterName);
+      const from = { step: stepEl.textContent.trim(), alter: alterEl ? Number(alterEl.textContent) || 0 : 0, octave: 4 };
+      if (!STEPS.includes(from.step)) continue;
+      const to = simplifyPitch(from, fifths, mode);
+      if (to.step === from.step && to.alter === from.alter) continue;
+      changed++;
+      setText(stepEl, to.step);
+      if (to.alter) {
+        if (alterEl) setText(alterEl, to.alter);
+        else c.insertBefore(makeElement(c.ownerDocument, alterName, to.alter), stepEl.nextSibling);
+      } else if (alterEl) {
+        c.removeChild(alterEl);
+      }
+    }
+  }
+  return changed;
+}
+
 function firstKey(part) {
   const key = part.getElementsByTagName("key")[0];
   if (!key) return { fifths: 0, mode: null };
@@ -339,8 +404,10 @@ function setTitle(root, title) {
  *          interval:{diatonic:number, chromatic:number}}|null} [options.region]
  *        zone (de start inclus à end exclu, offset en noires dans la mesure) qui reçoit en plus
  *        `region.interval` ; alignée sur des barres de mesure, l'armure change au début et revient à la fin
+ * @param {boolean} [options.simplify]  réécrit les notes et accords avec l'écriture la plus simple
+ *        (voir simplifyPitch), dans la zone si elle est donnée, sinon partout (armures à 7 altérations comprises)
  * @returns {{parts: Array<{id:string, from:{fifths:number, mode:string|null}, to:{fifths:number, mode:string|null},
- *            interval:object, regionInterval:object}>}}
+ *            interval:object, regionInterval:object, simplified:{notes:number, chords:number, keys:number}}>}}
  */
 export function transposeScore(doc, options = {}) {
   const root = doc.documentElement;
@@ -355,6 +422,7 @@ export function transposeScore(doc, options = {}) {
     partName = null,
     title = null,
     region = null,
+    simplify = false,
   } = options;
 
   if (title) setTitle(root, title);
@@ -389,10 +457,14 @@ export function transposeScore(doc, options = {}) {
     // Armures d'origine et affichées, par portée (« * » = toutes les portées).
     const sourceKeys = new Map([["*", initial.fifths]]);
     const keyByStaff = new Map([["*", initial.fifths]]);
+    const modeByStaff = new Map([["*", initial.mode]]);
     const currentKey = (staff) => keyByStaff.get(staff) ?? keyByStaff.get("*");
+    const currentMode = (staff) => (modeByStaff.has(staff) ? modeByStaff.get(staff) : modeByStaff.get("*"));
+    const simplified = { notes: 0, chords: 0, keys: 0 };
 
     children(part, "measure").forEach((measure, mi) => {
       const alterations = new Map();
+      const touched = new Set(); // notes (portée|nom+octave) dont l'écriture a changé dans la mesure
       const inZone = (offset) => Boolean(zone) &&
         comparePosition({ measure: mi, offset }, zone.start) >= 0 &&
         comparePosition({ measure: mi, offset }, zone.end) < 0;
@@ -416,16 +488,26 @@ export function transposeScore(doc, options = {}) {
             let fifths = source + (iv === ivIn ? shift.in : shift.out);
             while (fifths > 7) fifths -= 12;
             while (fifths < -7) fifths += 12;
+            // 7 altérations (Do♯, Do♭) → armure équivalente à 5 (Ré♭, Si). Seulement sur toute
+            // la partition : les notes qui suivent changent toutes d'écriture.
+            if (simplify && !zone && Math.abs(fifths) === 7) {
+              fifths -= Math.sign(fifths) * 12;
+              simplified.keys++;
+            }
             if (fifths !== source) setText(fifthsEl, fifths);
             const number = key.getAttribute("number");
+            const keyMode = childText(key, "mode");
             if (number) {
               sourceKeys.set(number, source);
               keyByStaff.set(number, fifths);
+              modeByStaff.set(number, keyMode);
             } else {
               sourceKeys.clear();
               sourceKeys.set("*", source);
               keyByStaff.clear();
               keyByStaff.set("*", fifths);
+              modeByStaff.clear();
+              modeByStaff.set("*", keyMode);
             }
           }
 
@@ -457,20 +539,31 @@ export function transposeScore(doc, options = {}) {
           const pitchEl = child(el, "pitch");
           if (!pitchEl) continue;
           const iv = inZone(start) ? ivIn : ivOut;
-          const isIdentity = isIdentityInterval(iv);
-          const pitch = transposePitch(readPitch(pitchEl), iv);
-          if (!isIdentity) writePitch(pitchEl, pitch);
-
           const staff = childText(el, "staff") ?? "1";
+          let pitch = transposePitch(readPitch(pitchEl), iv);
+          let rewrite = !isIdentityInterval(iv);
+          if (simplify && (!zone || inZone(start))) {
+            const simple = simplifyPitch(pitch, currentKey(staff), currentMode(staff));
+            if (!samePitch(simple, pitch)) {
+              touched.add(`${staff}|${pitch.step}${pitch.octave}`).add(`${staff}|${simple.step}${simple.octave}`);
+              pitch = simple;
+              rewrite = true;
+              simplified.notes++;
+            }
+          }
+          if (rewrite) writePitch(pitchEl, pitch);
+
           const slot = `${staff}|${pitch.step}${pitch.octave}`;
+          // Altérations à revoir : note réécrite, ou même nom de note qu'une note réécrite.
+          const recompute = rewrite || touched.has(slot);
           const expected = alterations.has(slot)
             ? alterations.get(slot)
             : keyAlter(currentKey(staff), pitch.step);
           if (hasTieStop(el)) {
             // Note liée : pas de nouvelle altération affichée.
-            if (!isIdentity) setAccidental(el, null);
+            if (rewrite) setAccidental(el, null);
           } else {
-            if (!isIdentity || pitch.alter !== expected) {
+            if (recompute || pitch.alter !== expected) {
               setAccidental(el, pitch.alter !== expected ? pitch.alter : null);
             }
             alterations.set(slot, pitch.alter);
@@ -478,6 +571,9 @@ export function transposeScore(doc, options = {}) {
         } else if (el.nodeName === "harmony") {
           const iv = inZone(pos) ? ivIn : ivOut;
           if (!isIdentityInterval(iv)) transposeHarmony(el, iv);
+          if (simplify && (!zone || inZone(pos))) {
+            simplified.chords += simplifyHarmony(el, currentKey("1"), currentMode("1"));
+          }
         }
       }
     });
@@ -500,6 +596,7 @@ export function transposeScore(doc, options = {}) {
       to: normalizeKey({ fifths: initial.fifths + shift.out, mode: initial.mode }),
       interval: ivOut,
       regionInterval: ivIn,
+      simplified,
     });
   }
   return report;

@@ -11,6 +11,7 @@ import {
   keyName,
   scoreTitle,
   semitoneLabel,
+  simplifyPitch,
 } from "../web/transpose.js";
 
 const parse = (xml) => new DOMParser().parseFromString(xml, "text/xml");
@@ -186,4 +187,99 @@ test("transposeScore : zone vide ou inversée ignorée", () => {
   const doc = parse(score([note("C", 4)]));
   transposeScore(doc, { region: { start: { measure: 0, offset: 1 }, end: { measure: 0, offset: 0 }, interval: intervalFromSemitones(5) } });
   assert.deepEqual(notesOf(doc).map((n) => n.name), ["C4"]);
+});
+
+// ---------------------------------------------------------------------------
+// Simplification de l'écriture
+// ---------------------------------------------------------------------------
+
+const sNote = (step, alter, octave, extra = "") =>
+  `<note><pitch><step>${step}</step>${alter ? `<alter>${alter}</alter>` : ""}<octave>${octave}</octave></pitch>` +
+  `<duration>1</duration>${extra}<type>quarter</type></note>`;
+const pitches = (doc) => [...doc.getElementsByTagName("note")].map((n) => {
+  const t = (name) => n.getElementsByTagName(name)[0]?.textContent;
+  const alter = Number(t("alter") ?? 0);
+  return `${t("step")}${alter > 0 ? "#".repeat(alter) : "b".repeat(-alter)}${t("octave")}`;
+});
+const accidentals = (doc) => [...doc.getElementsByTagName("note")].map((n) => n.getElementsByTagName("accidental")[0]?.textContent ?? "-");
+const spell = (p, fifths, mode) => {
+  const r = simplifyPitch(p, fifths, mode);
+  return `${r.step}${r.alter > 0 ? "#".repeat(r.alter) : "b".repeat(-r.alter)}${r.octave}`;
+};
+
+test("simplification : mi♯, si♯, fa♭, do♭ et doubles altérations (octave comprise)", () => {
+  assert.equal(spell({ step: "E", alter: 1, octave: 4 }, 0), "F4");
+  assert.equal(spell({ step: "B", alter: 1, octave: 3 }, 0), "C4");
+  assert.equal(spell({ step: "C", alter: -1, octave: 5 }, 0), "B4");
+  assert.equal(spell({ step: "F", alter: -1, octave: 4 }, 0), "E4");
+  assert.equal(spell({ step: "C", alter: 2, octave: 4 }, 0), "D4");
+  assert.equal(spell({ step: "B", alter: -2, octave: 4 }, 0), "A4");
+  assert.equal(spell({ step: "F", alter: 2, octave: 4 }, 0), "G4");
+  assert.equal(spell({ step: "B", alter: 2, octave: 4 }, 0), "C#5");
+});
+
+test("simplification : altérations les plus courantes selon la tonalité", () => {
+  // Do majeur : fa♯, do♯, sol♯, mi♭, si♭.
+  assert.deepEqual(
+    [["G", -1], ["D", -1], ["A", -1], ["D", 1], ["A", 1]].map(([s, a]) => spell({ step: s, alter: a, octave: 4 }, 0)),
+    ["F#4", "C#4", "G#4", "Eb4", "Bb4"],
+  );
+  // Sol majeur : la♯ → si♭ ; Ré majeur : la♯ (sensible de si mineur) gardé.
+  assert.equal(spell({ step: "A", alter: 1, octave: 4 }, 1), "Bb4");
+  assert.equal(spell({ step: "A", alter: 1, octave: 4 }, 2), "A#4");
+  // Fa majeur / ré mineur : do♯ (sensible) gardé, ré♯ → mi♭.
+  assert.equal(spell({ step: "D", alter: -1, octave: 4 }, -1), "C#4");
+  assert.equal(spell({ step: "D", alter: 1, octave: 4 }, -1), "Eb4");
+  // Mineur explicite : la mineur, sol♯ et fa♯ ; ré mineur, mi♭ (napolitaine).
+  assert.equal(spell({ step: "A", alter: -1, octave: 4 }, 0, "minor"), "G#4");
+  assert.equal(spell({ step: "G", alter: -1, octave: 4 }, 0, "minor"), "F#4");
+  assert.equal(spell({ step: "D", alter: 1, octave: 4 }, -1, "minor"), "Eb4");
+  // Notes de la gamme : écriture de l'armure, même mi♯ en Fa♯ majeur.
+  assert.equal(spell({ step: "F", alter: 0, octave: 4 }, 6), "E#4");
+  assert.equal(spell({ step: "B", alter: 0, octave: 4 }, -6), "Cb5");
+  assert.equal(spell({ step: "A", alter: 1, octave: 4 }, -2), "Bb4");
+  // Écriture déjà simple : inchangée.
+  assert.equal(spell({ step: "F", alter: 1, octave: 4 }, 0), "F#4");
+});
+
+test("simplification d'une partition : notes, altérations affichées, accords, liaisons", () => {
+  const harmony = "<harmony><root><root-step>E</root-step><root-alter>1</root-alter></root><kind>major</kind>" +
+    "<bass><bass-step>A</bass-step><bass-alter>1</bass-alter></bass></harmony>";
+  const xml = score([
+    harmony +
+    sNote("A", 1, 4, "<accidental>sharp</accidental>") +
+    sNote("A", 0, 4, "<accidental>natural</accidental>") +
+    sNote("E", 1, 4, '<tie type="start"/><accidental>sharp</accidental>') +
+    sNote("E", 1, 4, '<tie type="stop"/>'),
+    sNote("F", 1, 4, "<accidental>sharp</accidental>") + sNote("B", 1, 3, "<accidental>sharp</accidental>"),
+  ]);
+  const doc = parse(xml);
+  const report = transposeScore(doc, { simplify: true });
+  assert.deepEqual(pitches(doc), ["Bb4", "A4", "F4", "F4", "F#4", "C4"]);
+  // si♭ affiché, bécarre du la devenu inutile retiré, fa sans altération, liaison sans altération.
+  assert.deepEqual(accidentals(doc), ["flat", "-", "-", "-", "sharp", "-"]);
+  assert.deepEqual(report.parts[0].simplified, { notes: 4, chords: 2, keys: 0 });
+  const out = serialize(doc);
+  assert.ok(out.includes("<root-step>F</root-step></root>"));
+  assert.ok(out.includes("<bass-step>B</bass-step><bass-alter>-1</bass-alter>"));
+  // Deuxième passage : plus rien à simplifier.
+  const again = transposeScore(doc, { simplify: true });
+  assert.deepEqual(again.parts[0].simplified, { notes: 0, chords: 0, keys: 0 });
+});
+
+test("simplification : armure à 7 altérations remplacée, sélection respectée", () => {
+  const doc = parse(score([sNote("C", 1, 4) + sNote("E", 1, 4)], { fifths: 7 }));
+  const report = transposeScore(doc, { simplify: true });
+  assert.equal(doc.getElementsByTagName("fifths")[0].textContent, "-5");
+  assert.deepEqual(pitches(doc), ["Db4", "F4"]);
+  assert.equal(report.parts[0].simplified.keys, 1);
+
+  // Sélection : seule la 2e mesure est réécrite, l'armure n'est pas changée.
+  const doc2 = parse(score([sNote("E", 1, 4), sNote("E", 1, 4)]));
+  const zone = { start: { measure: 1, offset: 0 }, end: { measure: 2, offset: 0 }, interval: { diatonic: 0, chromatic: 0 } };
+  transposeScore(doc2, { simplify: true, region: zone });
+  assert.deepEqual(pitches(doc2), ["E#4", "F4"]);
+  const doc3 = parse(score([sNote("C", 1, 4)], { fifths: 7 }));
+  transposeScore(doc3, { simplify: true, region: { ...zone, start: { measure: 0, offset: 0 } } });
+  assert.equal(doc3.getElementsByTagName("fifths")[0].textContent, "7");
 });

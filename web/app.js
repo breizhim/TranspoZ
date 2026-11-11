@@ -31,6 +31,7 @@ const ui = {
   status: $("status"),
   title: $("title"),
   shiftButtons: [...document.querySelectorAll("[data-shift]")],
+  simplifyBtn: $("simplify-btn"),
   keyPref: $("key-pref"),
   summary: $("summary"),
   printBtn: $("print-btn"),
@@ -1264,9 +1265,35 @@ function transposeSelection(shift) {
   setStatus(`${label[0].toUpperCase()}${label.slice(1)} : ${semitoneLabel(state.appliedShift)} au total.`);
 }
 
+// Réécrit la sélection avec l'écriture la plus simple (même son) : mi♯ → fa, la♯ → si♭…
+function simplifySelection() {
+  if (!state.sourceXml) return;
+  if (!hasSelection()) {
+    setStatus("Sélectionnez d'abord une partie de la partition (ou « Tout »).");
+    return;
+  }
+  const doc = new DOMParser().parseFromString(state.sourceXml, "application/xml");
+  if (doc.getElementsByTagName("parsererror").length) return;
+  const report = transposeScore(doc, { ...buildTransposition().options, simplify: true });
+  const total = { notes: 0, chords: 0, keys: 0 };
+  for (const p of report.parts) for (const k in total) total[k] += p.simplified[k];
+  const plural = (n, word) => `${n} ${word}${n > 1 ? "s" : ""}`;
+  const done = [
+    total.notes && plural(total.notes, "note"),
+    total.chords && plural(total.chords, "accord"),
+    total.keys && plural(total.keys, "armure"),
+  ].filter(Boolean);
+  if (!done.length) {
+    setStatus("Simplification : l'écriture est déjà la plus simple.");
+    return;
+  }
+  commit(new XMLSerializer().serializeToString(doc), state.selected);
+  setStatus(`Écriture simplifiée (même son) : ${done.join(", ")}.`);
+}
+
 function updateRegionInfo() {
   const r = state.region;
-  for (const b of ui.shiftButtons) b.disabled = !state.sourceXml || !hasSelection();
+  for (const b of [...ui.shiftButtons, ui.simplifyBtn]) b.disabled = !state.sourceXml || !hasSelection();
   ui.selectAll.disabled = r === "all";
   ui.selectNone.disabled = r === null;
   if (r === "all") ui.regionInfo.textContent = "Toute la partition est sélectionnée.";
@@ -2016,6 +2043,7 @@ ui.title.addEventListener("input", () => {
   clearTimeout(titleTimer);
   titleTimer = setTimeout(update, 300);
 });
+ui.simplifyBtn.addEventListener("click", simplifySelection);
 for (const b of ui.shiftButtons) {
   b.addEventListener("click", () => {
     const n = Number(b.dataset.shift);
