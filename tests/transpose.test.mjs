@@ -218,28 +218,25 @@ test("simplification : mi♯, si♯, fa♭, do♭ et doubles altérations (octav
   assert.equal(spell({ step: "B", alter: 2, octave: 4 }, 0), "C#5");
 });
 
-test("simplification : altérations les plus courantes selon la tonalité", () => {
-  // Do majeur : fa♯, do♯, sol♯, mi♭, si♭.
-  assert.deepEqual(
-    [["G", -1], ["D", -1], ["A", -1], ["D", 1], ["A", 1]].map(([s, a]) => spell({ step: s, alter: a, octave: 4 }, 0)),
-    ["F#4", "C#4", "G#4", "Eb4", "Bb4"],
-  );
-  // Sol majeur : la♯ → si♭ ; Ré majeur : la♯ (sensible de si mineur) gardé.
-  assert.equal(spell({ step: "A", alter: 1, octave: 4 }, 1), "Bb4");
-  assert.equal(spell({ step: "A", alter: 1, octave: 4 }, 2), "A#4");
-  // Fa majeur / ré mineur : do♯ (sensible) gardé, ré♯ → mi♭.
-  assert.equal(spell({ step: "D", alter: -1, octave: 4 }, -1), "C#4");
-  assert.equal(spell({ step: "D", alter: 1, octave: 4 }, -1), "Eb4");
-  // Mineur explicite : la mineur, sol♯ et fa♯ ; ré mineur, mi♭ (napolitaine).
-  assert.equal(spell({ step: "A", alter: -1, octave: 4 }, 0, "minor"), "G#4");
-  assert.equal(spell({ step: "G", alter: -1, octave: 4 }, 0, "minor"), "F#4");
-  assert.equal(spell({ step: "D", alter: 1, octave: 4 }, -1, "minor"), "Eb4");
-  // Notes de la gamme : écriture de l'armure, même mi♯ en Fa♯ majeur.
-  assert.equal(spell({ step: "F", alter: 0, octave: 4 }, 6), "E#4");
-  assert.equal(spell({ step: "B", alter: 0, octave: 4 }, -6), "Cb5");
-  assert.equal(spell({ step: "A", alter: 1, octave: 4 }, -2), "Bb4");
-  // Écriture déjà simple : inchangée.
-  assert.equal(spell({ step: "F", alter: 1, octave: 4 }, 0), "F#4");
+test("simplification : toujours do♯, mi♭, fa♯, sol♯, si♭ hors armure", () => {
+  const black = [["D", -1], ["D", 1], ["G", -1], ["A", -1], ["A", 1]];
+  for (const fifths of [0, 2, -3, 5]) {
+    const out = black.map(([st, a]) => spell({ step: st, alter: a, octave: 4 }, fifths));
+    const expected = { 0: ["C#4", "Eb4", "F#4", "G#4", "Bb4"], 2: ["C#4", "Eb4", "F#4", "G#4", "Bb4"],
+      // Mi♭ majeur : la♭ et si♭ de l'armure gardés.
+      "-3": ["C#4", "Eb4", "F#4", "Ab4", "Bb4"],
+      // Si majeur (5♯) : do♯, ré♯, fa♯, sol♯, la♯ de l'armure gardés.
+      5: ["C#4", "D#4", "F#4", "G#4", "A#4"] }[fifths];
+    assert.deepEqual(out, expected, `armure ${fifths}`);
+  }
+  // Ré majeur (CABARET) : la♯ → si♭ quelle que soit la mélodie.
+  assert.equal(spell({ step: "A", alter: 1, octave: 4 }, 2), "Bb4");
+  // Mi♯ remplacé même dans l'armure (Fa♯ majeur) ; do♭ aussi (Sol♭ majeur).
+  assert.equal(spell({ step: "E", alter: 1, octave: 4 }, 6), "F4");
+  assert.equal(spell({ step: "C", alter: -1, octave: 5 }, -6), "B4");
+  // Notes naturelles hors armure : écrites sans altération (fa ♮ en Ré majeur).
+  assert.equal(spell({ step: "E", alter: 1, octave: 4 }, 2), "F4");
+  assert.equal(spell({ step: "F", alter: 0, octave: 4 }, 2), "F4");
 });
 
 test("simplification d'une partition : notes, altérations affichées, accords, liaisons", () => {
@@ -282,23 +279,4 @@ test("simplification : armure à 7 altérations remplacée, sélection respecté
   const doc3 = parse(score([sNote("C", 1, 4)], { fifths: 7 }));
   transposeScore(doc3, { simplify: true, region: { ...zone, start: { measure: 0, offset: 0 } } });
   assert.equal(doc3.getElementsByTagName("fifths")[0].textContent, "7");
-});
-
-test("simplification : sens de la mélodie (dièse en montant, bémol en descendant)", () => {
-  const run = (notes, fifths = 2) => {
-    const doc = parse(score([notes.map(([st, a]) => sNote(st, a, 4)).join("")], { fifths }));
-    transposeScore(doc, { simplify: true });
-    return pitches(doc).join(" ");
-  };
-  // Ré majeur (CABARET) : si → la♯ → la devient si♭ ; la → la♯ → si reste la♯.
-  assert.equal(run([["B", 0], ["A", 1], ["A", 0]]), "B4 Bb4 A4");
-  assert.equal(run([["A", 0], ["A", 1], ["B", 0]]), "A4 A#4 B4");
-  // Broderie ré♯ mi fa♯ mi ré♯ : les deux ré♯ restent identiques.
-  assert.equal(run([["D", 1], ["E", 0], ["F", 1], ["E", 0], ["D", 1]]), "D#4 E4 F#4 E4 D#4");
-  // Notes répétées : même écriture, d'après la note qui suit.
-  assert.equal(run([["D", 1], ["D", 1], ["D", 0]]), "Eb4 Eb4 D4");
-  // Do majeur : sol → sol♭ → fa en bémol, même si fa♯ est l'écriture habituelle.
-  assert.equal(run([["G", 0], ["F", 1], ["F", 0]], 0), "G4 Gb4 F4");
-  // Jamais de mi♯ pour monter vers fa♯ : fa ♮ gardé.
-  assert.equal(run([["F", 0], ["F", 1]]), "F4 F#4");
 });
