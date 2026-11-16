@@ -12,6 +12,11 @@ Audiveris est un programme distinct, appelé en ligne de commande ; il n'est pas
 Audiveris inclut un environnement Java (OpenJDK, GPL v2 avec exception « Classpath ») ;
 ses licences sont dans `audiveris/lib/runtime/legal/` (Linux) ou `audiveris/runtime/legal/` (Windows).
 
+## Sons de trompette (VSCO 2 Community Edition)
+
+Lecture de la partition. Enregistrements de trompette de Versilian Studios, domaine public (CC0 1.0),
+convertis par `scripts/prepare-trumpet-samples.py` — https://github.com/sgossner/VSCO-2-CE
+
 ## OpenSheetMusicDisplay
 
 Affichage des partitions. Licence BSD-3-Clause — https://github.com/opensheetmusicdisplay/opensheetmusicdisplay

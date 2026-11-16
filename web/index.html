@@ -73,7 +73,15 @@
           <label for="tempo">Tempo : <span id="tempo-label">100</span> à la noire</label>
           <input type="range" id="tempo" min="30" max="220" step="1" value="100">
         </div>
-        <p class="hint">Son de trompette synthétisé, notes telles qu'écrites sur la partition.</p>
+        <div class="field">
+          <label for="sound">Son</label>
+          <select id="sound">
+            <option value="trumpet" selected>Trompette (enregistrée)</option>
+            <option value="synth">Synthétiseur</option>
+          </select>
+        </div>
+        <p class="hint">Notes telles qu'écrites sur la partition. Trompette enregistrée : VSCO 2 Community Edition
+          (Versilian Studios, domaine public).</p>
       </section>
 
       <section class="card actions">

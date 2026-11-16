@@ -56,6 +56,7 @@ const ui = {
   stopBtn: $("stop-btn"),
   tempo: $("tempo"),
   tempoLabel: $("tempo-label"),
+  sound: $("sound"),
   editor: $("editor"),
   editorTools: $("editor-tools"),
   selInfo: $("sel-info"),
@@ -583,7 +584,10 @@ async function togglePlayback() {
     }
   }
   try {
+    const loading = player.instrument === "trumpet" && !player.samples?.sets;
+    if (loading) setStatus("Chargement du son de trompette…");
     await player.play();
+    if (loading && player.instrument === "trumpet") setStatus("");
   } catch (err) {
     setStatus(`Lecture impossible : ${err.message}`, "error");
   }
@@ -636,6 +640,10 @@ function seekTo(pos) {
 }
 
 player.onEnd = stopPlayback;
+player.onSamplesError = () => {
+  ui.sound.value = "synth";
+  setStatus("Son de trompette indisponible : lecture avec le synthétiseur.", "error");
+};
 
 // ---------------------------------------------------------------------------
 // Correction de la partition
@@ -2125,6 +2133,9 @@ ui.undoBtn.addEventListener("click", undo);
 ui.redoBtn.addEventListener("click", redo);
 document.addEventListener("keydown", handleEditorKey);
 ui.stopBtn.addEventListener("click", stopPlayback);
+ui.sound.addEventListener("change", () => {
+  player.setInstrument(ui.sound.value).then(updatePlayButton);
+});
 ui.tempo.addEventListener("input", () => {
   ui.tempoLabel.textContent = ui.tempo.value;
   player.setBpm(Number(ui.tempo.value)).then(() => {

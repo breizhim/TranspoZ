@@ -43,6 +43,7 @@ const MIME = {
   ".xml": "application/xml",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".mp3": "audio/mpeg",
 };
 
 function resolveWebFile(urlPath) {

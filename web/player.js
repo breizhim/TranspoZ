@@ -342,6 +342,75 @@ function playTrumpetNote(ctx, out, midi, when, duration, level = 1) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Trompette enregistrée : VSCO 2 Community Edition (Versilian Studios, domaine public),
+// une note tous les 2 à 4 demi-tons, tenue avec vibrato (« sus ») et piquée (« stac »),
+// préparée par scripts/prepare-trumpet-samples.py. Chaque note jouée part de
+// l'enregistrement le plus proche, réaccordé.
+// ---------------------------------------------------------------------------
+
+const SAMPLES_URL = new URL("./samples/trumpet/", import.meta.url);
+
+export class TrumpetSamples {
+  constructor(ctx) {
+    this.ctx = ctx;
+    this.sets = null; // { sus: [{ midi, buffer, start }], stac: [...] }
+    this.loading = null;
+  }
+
+  load() {
+    this.loading ??= (async () => {
+      const list = await (await fetch(new URL("notes.json", SAMPLES_URL))).json();
+      const sets = {};
+      for (const [name, notes] of Object.entries(list)) {
+        sets[name] = await Promise.all(notes.map(async (midi) => {
+          const res = await fetch(new URL(`${name}-${midi}.mp3`, SAMPLES_URL));
+          if (!res.ok) throw new Error(`Son introuvable : ${name}-${midi}.mp3`);
+          const buffer = await this.ctx.decodeAudioData(await res.arrayBuffer());
+          // Début du son (le décodage MP3 peut ajouter un court silence au début).
+          const data = buffer.getChannelData(0);
+          let peak = 0;
+          for (const v of data) peak = Math.max(peak, Math.abs(v));
+          const first = data.findIndex((v) => Math.abs(v) > 0.02 * peak);
+          return { midi, buffer, start: Math.max(0, first / buffer.sampleRate - 0.003) };
+        }));
+      }
+      this.sets = sets;
+    })();
+    return this.loading;
+  }
+
+  play(out, midi, when, duration, { short = false, level = 1 } = {}) {
+    const set = this.sets[short ? "stac" : "sus"];
+    const sample = set.reduce((a, b) => (Math.abs(b.midi - midi) < Math.abs(a.midi - midi) ? b : a));
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = sample.buffer;
+    src.playbackRate.value = 2 ** ((midi - sample.midi) / 12);
+    const rate = src.playbackRate.value;
+    const release = short ? 0.05 : 0.09;
+    // Note plus longue que l'enregistrement : on boucle sur sa partie tenue.
+    const available = (sample.buffer.duration - sample.start - 0.3) / rate;
+    if (!short && duration > available) {
+      src.loop = true;
+      src.loopStart = sample.start + 1.2;
+      src.loopEnd = sample.buffer.duration - 0.35;
+    }
+    const amp = ctx.createGain();
+    const gain = 0.8 * Math.min(level, 1.6);
+    amp.gain.setValueAtTime(gain, when);
+    // Accent : attaque plus marquée, puis retour au niveau normal.
+    if (level > 1) amp.gain.setTargetAtTime(0.8, when + 0.08, 0.08);
+    amp.gain.setTargetAtTime(0, when + duration, release / 3);
+    src.connect(amp).connect(out);
+    src.start(when, sample.start);
+    src.stop(when + duration + release * 2);
+  }
+}
+
+/** Instruments du lecteur : trompette enregistrée, ou synthétiseur (sans téléchargement). */
+export const INSTRUMENTS = { trumpet: "Trompette (enregistrée)", synth: "Synthétiseur" };
+
 export class TrumpetPlayer {
   constructor() {
     this.ctx = null;
@@ -352,6 +421,9 @@ export class TrumpetPlayer {
     this.onEnd = null;
     this.bus = null;
     this.timer = null;
+    this.instrument = "trumpet";
+    this.samples = null;
+    this.onSamplesError = null; // appelé si les sons enregistrés ne se chargent pas
   }
 
   /** Charge une partition (Document MusicXML). Arrête la lecture, garde la position. */
@@ -384,6 +456,14 @@ export class TrumpetPlayer {
     return this.events?.length ?? 0;
   }
 
+  /** Change le son (en cours de lecture : reprend au même endroit). */
+  async setInstrument(name) {
+    const wasPlaying = this.playing;
+    if (wasPlaying) this.pause();
+    this.instrument = name;
+    if (wasPlaying) await this.play();
+  }
+
   /** Change le tempo (en cours de lecture : reprend au même endroit). */
   async setBpm(bpm) {
     const wasPlaying = this.playing;
@@ -409,8 +489,28 @@ export class TrumpetPlayer {
     wet.gain.value = 0.18;
     formant.connect(comp).connect(master).connect(ctx.destination);
     master.connect(reverb).connect(wet).connect(ctx.destination);
+    // Les sons enregistrés ont déjà leur timbre : ils ne passent pas par le formant.
+    const natural = ctx.createGain();
+    natural.gain.value = 1.2;
+    natural.connect(comp);
     this.out = formant;
+    this.naturalOut = natural;
     return formant;
+  }
+
+  /** Sons enregistrés prêts (chargés à la première lecture), sinon null : synthétiseur. */
+  async _samples() {
+    if (this.instrument !== "trumpet") return null;
+    this.samples ??= new TrumpetSamples(this.ctx);
+    try {
+      await this.samples.load();
+      return this.samples;
+    } catch (err) {
+      console.warn(err);
+      this.instrument = "synth";
+      this.onSamplesError?.(err);
+      return null;
+    }
   }
 
   /** Position courante en noires (pour le curseur). */
@@ -423,10 +523,11 @@ export class TrumpetPlayer {
     if (this.playing || !this.events) return;
     const out = this._output();
     await this.ctx.resume();
+    const samples = await this._samples();
     if (this.playing) return;
     // Chaque lecture a son propre volume, coupé d'un coup à la pause.
     const bus = (this.bus = this.ctx.createGain());
-    bus.connect(out);
+    bus.connect(samples ? this.naturalOut : out);
     if (this.position >= this.length) this.position = 0;
     this.time = timeline(this.events.tempos, this.bpm / this.scoreBpm);
     // startTime = instant (horloge audio) correspondant au début de la partition.
@@ -454,7 +555,13 @@ export class TrumpetPlayer {
         else if (art.includes("staccato")) sounding = Math.min(sounding, length * 0.5);
         else if (art.includes("tenuto")) sounding = length * 0.98;
         const level = art.includes("strong-accent") ? 1.7 : art.includes("accent") ? 1.4 : 1;
-        playTrumpetNote(this.ctx, bus, n.midi, this.startTime + on, sounding, level);
+        if (samples) {
+          // Piqué, ou note très brève : enregistrement piqué.
+          const short = sounding < 0.22 || art.includes("staccato") || art.includes("staccatissimo");
+          samples.play(bus, n.midi, this.startTime + on, sounding, { short, level });
+        } else {
+          playTrumpetNote(this.ctx, bus, n.midi, this.startTime + on, sounding, level);
+        }
       }
       if (this.ctx.currentTime - this.startTime >= endSec + 0.1) {
         this.stop();
