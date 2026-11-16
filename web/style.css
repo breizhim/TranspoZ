@@ -10,6 +10,7 @@
   --paper: #ffffff;
   --radius: 10px;
   color-scheme: light;
+  accent-color: var(--accent); /* curseurs et cases à cocher aux couleurs de l'application */
 }
 
 @media (prefers-color-scheme: dark) {
@@ -91,7 +92,7 @@ input[type="text"], select {
   color: var(--text);
   font: inherit;
 }
-input[type="range"] { width: 100%; accent-color: var(--accent); }
+input[type="range"] { width: 100%; }
 
 button {
   font: inherit;
@@ -227,14 +228,17 @@ button.link { border: none; background: none; color: var(--accent); padding: 4px
 
 .popup {
   position: fixed; z-index: 20;
+  inset: auto; margin: 0; /* popover : placé au clic (left/top), pas centré */
   min-width: 180px; max-width: min(420px, calc(100vw - 16px));
   background: var(--surface); color: var(--text);
   border: 1px solid var(--border); border-radius: 8px;
   box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
   padding: 8px;
-  display: flex; flex-direction: column; gap: 6px;
+  display: none; flex-direction: column; gap: 6px;
 }
-.popup[hidden] { display: none; }
+/* Deux règles séparées : un navigateur sans :popover-open ignorerait toute la règle. */
+.popup:not([popover]):not([hidden]) { display: flex; }
+.popup:popover-open { display: flex; }
 .popup button { padding: 4px 10px; font-size: 14px; }
 .popup select, .popup input[type="text"] { padding: 4px 6px; font-size: 14px; }
 .popup .popup-form { display: flex; flex-direction: column; gap: 8px; }

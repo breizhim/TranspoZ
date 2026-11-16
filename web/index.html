@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
   <title>TranspoZ</title>
   <meta name="description" content="Transposez une partition PDF ou JPG en direct, corrigez-la, écoutez-la, puis imprimez-la.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎼</text></svg>">
@@ -242,7 +243,7 @@
       </div>
       <div class="checks no-print" id="checks" hidden></div>
 
-      <div class="popup no-print" id="popup" role="dialog" hidden></div>
+      <div class="popup no-print" id="popup" role="dialog" aria-label="Modification de la partition" hidden></div>
       <!-- Deux volets à défilement indépendant : original (PDF, images) et partition retranscrite. -->
       <div class="views stacked" id="views">
       <div class="original no-print" id="original" hidden></div>

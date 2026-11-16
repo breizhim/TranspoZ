@@ -956,7 +956,7 @@ function handleEditorKey(e) {
     e.preventDefault();
     return;
   }
-  if (!ui.popup.hidden) {
+  if (popupOpen()) {
     if (e.key === "Escape") {
       closePopup();
       e.preventDefault();
@@ -1417,7 +1417,7 @@ function setMode(mode) {
 }
 
 function onScoreMove(e) {
-  if (!ui.popup.hidden || state.rendering || !state.analysis) return;
+  if (popupOpen() || state.rendering || !state.analysis) return;
   if (state.mode === "dynamics" && state.wedgePlacing) {
     wedgeHover(e);
     return;
@@ -1578,9 +1578,25 @@ function h(tag, props = {}, ...kids) {
 
 const nodes = (content) => [content].flat().filter((c) => c != null);
 
+// Fenêtre contextuelle : API Popover si disponible (au-dessus de tout, fermée par un clic
+// à côté ou Échap) ; sinon attribut hidden, et fermeture au clic gérée plus bas.
+const HAS_POPOVER = Object.hasOwn(HTMLElement.prototype, "popover");
+if (HAS_POPOVER) {
+  ui.popup.setAttribute("popover", "auto");
+  ui.popup.hidden = false;
+  ui.popup.addEventListener("toggle", (e) => {
+    if (e.newState === "closed") clearPopup();
+  });
+}
+const popupOpen = () => (HAS_POPOVER ? ui.popup.matches(":popover-open") : !ui.popup.hidden);
+
 function openPopup(e, content) {
   ui.popup.replaceChildren(...nodes(content));
-  ui.popup.hidden = false;
+  if (HAS_POPOVER) {
+    if (!popupOpen()) ui.popup.showPopover();
+  } else {
+    ui.popup.hidden = false;
+  }
   const { width, height } = ui.popup.getBoundingClientRect();
   ui.popup.style.left = `${Math.max(8, Math.min(e.clientX - 20, innerWidth - width - 8))}px`;
   ui.popup.style.top = `${Math.max(8, Math.min(e.clientY + 14, innerHeight - height - 8))}px`;
@@ -1592,10 +1608,18 @@ function setPopup(content) {
   ui.popup.querySelector("button, select, input")?.focus();
 }
 
-function closePopup() {
-  ui.popup.hidden = true;
+function clearPopup() {
   ui.popup.replaceChildren();
   hideInsertLine();
+}
+
+function closePopup() {
+  if (HAS_POPOVER) {
+    if (popupOpen()) ui.popup.hidePopover();
+  } else {
+    ui.popup.hidden = true;
+  }
+  clearPopup();
 }
 
 const DURATIONS = [
@@ -2076,11 +2100,13 @@ ui.playBtn.addEventListener("click", togglePlayback);
 ui.score.addEventListener("click", onScoreClick);
 ui.score.addEventListener("mousemove", onScoreMove);
 ui.score.addEventListener("mouseleave", () => {
-  if (ui.popup.hidden) hideInsertLine();
+  if (!popupOpen()) hideInsertLine();
 });
-document.addEventListener("mousedown", (e) => {
-  if (!ui.popup.hidden && !ui.popup.contains(e.target)) closePopup();
-});
+if (!HAS_POPOVER) {
+  document.addEventListener("mousedown", (e) => {
+    if (popupOpen() && !ui.popup.contains(e.target)) closePopup();
+  });
+}
 for (const b of ui.modeButtons) b.addEventListener("click", () => setMode(b.dataset.mode));
 ui.playFromStart.addEventListener("click", stopPlayback);
 ui.selectAll.addEventListener("click", () => setRegion("all"));
