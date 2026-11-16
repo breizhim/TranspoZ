@@ -15,7 +15,7 @@ import {
 } from "./transpose.js";
 import { readMusicXML, readScoreFile, writeScoreFile, isMusicXMLName } from "./mxl.js";
 import { mergeScores } from "./merge.js";
-import { TrumpetPlayer } from "./player.js";
+import { INSTRUMENTS, ScorePlayer } from "./player.js";
 import * as editor from "./editor.js";
 
 // Adresse du serveur de reconnaissance (config.js). Vide = même origine que la page.
@@ -108,7 +108,7 @@ const state = {
   region: "all",
 };
 
-const player = new TrumpetPlayer();
+const player = new ScorePlayer();
 
 // ---------------------------------------------------------------------------
 // Formulaires
@@ -584,10 +584,10 @@ async function togglePlayback() {
     }
   }
   try {
-    const loading = player.instrument === "trumpet" && !player.samples?.sets;
-    if (loading) setStatus("Chargement du son de trompette…");
+    const loading = !player.samplesReady;
+    if (loading) setStatus(`Chargement du son : ${INSTRUMENTS[player.instrument].label.toLowerCase()}…`);
     await player.play();
-    if (loading && player.instrument === "trumpet") setStatus("");
+    if (loading && player.samplesReady) setStatus("");
   } catch (err) {
     setStatus(`Lecture impossible : ${err.message}`, "error");
   }
@@ -640,10 +640,11 @@ function seekTo(pos) {
 }
 
 player.onEnd = stopPlayback;
-player.onSamplesError = () => {
+player.onSamplesError = (err, name) => {
   ui.sound.value = "synth";
-  setStatus("Son de trompette indisponible : lecture avec le synthétiseur.", "error");
+  setStatus(`Son « ${INSTRUMENTS[name].label} » indisponible : lecture avec le synthétiseur.`, "error");
 };
+ui.sound.replaceChildren(...Object.entries(INSTRUMENTS).map(([value, { label }]) => h("option", { value }, label)));
 
 // ---------------------------------------------------------------------------
 // Correction de la partition
@@ -2133,8 +2134,14 @@ ui.undoBtn.addEventListener("click", undo);
 ui.redoBtn.addEventListener("click", redo);
 document.addEventListener("keydown", handleEditorKey);
 ui.stopBtn.addEventListener("click", stopPlayback);
-ui.sound.addEventListener("change", () => {
-  player.setInstrument(ui.sound.value).then(updatePlayButton);
+ui.sound.addEventListener("change", async () => {
+  const wasPlaying = player.playing;
+  player.instrument = ui.sound.value;
+  const loading = wasPlaying && !player.samplesReady;
+  if (loading) setStatus(`Chargement du son : ${INSTRUMENTS[ui.sound.value].label.toLowerCase()}…`);
+  await player.setInstrument(ui.sound.value);
+  if (loading && player.samplesReady) setStatus("");
+  updatePlayButton();
 });
 ui.tempo.addEventListener("input", () => {
   ui.tempoLabel.textContent = ui.tempo.value;

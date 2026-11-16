@@ -343,62 +343,79 @@ function playTrumpetNote(ctx, out, midi, when, duration, level = 1) {
 }
 
 // ---------------------------------------------------------------------------
-// Trompette enregistrée : VSCO 2 Community Edition (Versilian Studios, domaine public),
-// une note tous les 2 à 4 demi-tons, tenue avec vibrato (« sus ») et piquée (« stac »),
-// préparée par scripts/prepare-trumpet-samples.py. Chaque note jouée part de
-// l'enregistrement le plus proche, réaccordé.
+// Instruments enregistrés (domaine public) : VSCO 2 Community Edition et Versilian Community
+// Sample Library, de Versilian Studios. Une note tous les 2 à 4 demi-tons, tenue (« sus ») et,
+// pour les vents, piquée (« stac »), préparée par scripts/prepare-samples.py. Chaque note
+// jouée part de l'enregistrement le plus proche, réaccordé (écart de justesse compensé).
 // ---------------------------------------------------------------------------
 
-const SAMPLES_URL = new URL("./samples/trumpet/", import.meta.url);
+const SAMPLES_URL = new URL("./samples/", import.meta.url);
 
-export class TrumpetSamples {
-  constructor(ctx) {
+/** Sons du lecteur. `decays` : son qui s'éteint seul (piano), sinon tenu tant que dure la note. */
+export const INSTRUMENTS = {
+  trumpet: { label: "Trompette" },
+  flute: { label: "Flûte traversière" },
+  clarinet: { label: "Clarinette" },
+  sax: { label: "Saxophone ténor" },
+  piano: { label: "Piano", decays: true },
+  synth: { label: "Synthétiseur (trompette)" },
+};
+
+export class SampledInstrument {
+  constructor(ctx, name) {
     this.ctx = ctx;
-    this.sets = null; // { sus: [{ midi, buffer, start }], stac: [...] }
+    this.name = name;
+    this.decays = Boolean(INSTRUMENTS[name]?.decays);
+    this.sets = null; // { sus: [{ pitch, buffer, start }], stac: [...] }
     this.loading = null;
   }
 
   load() {
     this.loading ??= (async () => {
-      const list = await (await fetch(new URL("notes.json", SAMPLES_URL))).json();
+      const base = new URL(`${this.name}/`, SAMPLES_URL);
+      const res = await fetch(new URL("notes.json", base));
+      if (!res.ok) throw new Error(`Sons introuvables : ${this.name}`);
       const sets = {};
-      for (const [name, notes] of Object.entries(list)) {
-        sets[name] = await Promise.all(notes.map(async (midi) => {
-          const res = await fetch(new URL(`${name}-${midi}.mp3`, SAMPLES_URL));
-          if (!res.ok) throw new Error(`Son introuvable : ${name}-${midi}.mp3`);
-          const buffer = await this.ctx.decodeAudioData(await res.arrayBuffer());
+      for (const [set, notes] of Object.entries(await res.json())) {
+        sets[set] = await Promise.all(notes.map(async ([midi, cents]) => {
+          const file = await fetch(new URL(`${set}-${midi}.mp3`, base));
+          if (!file.ok) throw new Error(`Son introuvable : ${this.name}/${set}-${midi}.mp3`);
+          const buffer = await this.ctx.decodeAudioData(await file.arrayBuffer());
           // Début du son (le décodage MP3 peut ajouter un court silence au début).
           const data = buffer.getChannelData(0);
           let peak = 0;
           for (const v of data) peak = Math.max(peak, Math.abs(v));
           const first = data.findIndex((v) => Math.abs(v) > 0.02 * peak);
-          return { midi, buffer, start: Math.max(0, first / buffer.sampleRate - 0.003) };
+          return { pitch: midi + cents / 100, buffer, start: Math.max(0, first / buffer.sampleRate - 0.003) };
         }));
       }
       this.sets = sets;
     })();
+    this.loading.catch(() => {
+      this.loading = null; // nouvel essai à la prochaine lecture
+    });
     return this.loading;
   }
 
   play(out, midi, when, duration, { short = false, level = 1 } = {}) {
-    const set = this.sets[short ? "stac" : "sus"];
-    const sample = set.reduce((a, b) => (Math.abs(b.midi - midi) < Math.abs(a.midi - midi) ? b : a));
+    const set = this.sets[short && this.sets.stac ? "stac" : "sus"];
+    const sample = set.reduce((a, b) => (Math.abs(b.pitch - midi) < Math.abs(a.pitch - midi) ? b : a));
     const ctx = this.ctx;
     const src = ctx.createBufferSource();
     src.buffer = sample.buffer;
-    src.playbackRate.value = 2 ** ((midi - sample.midi) / 12);
+    src.playbackRate.value = 2 ** ((midi - sample.pitch) / 12);
     const rate = src.playbackRate.value;
-    const release = short ? 0.05 : 0.09;
-    // Note plus longue que l'enregistrement : on boucle sur sa partie tenue.
+    // Piano : étouffoir un peu plus lent que la fin d'un souffle.
+    const release = this.decays ? 0.25 : short ? 0.05 : 0.09;
+    // Vent tenu plus longtemps que l'enregistrement : on boucle sur sa partie tenue.
     const available = (sample.buffer.duration - sample.start - 0.3) / rate;
-    if (!short && duration > available) {
+    if (!this.decays && !short && duration > available) {
       src.loop = true;
       src.loopStart = sample.start + 1.2;
       src.loopEnd = sample.buffer.duration - 0.35;
     }
     const amp = ctx.createGain();
-    const gain = 0.8 * Math.min(level, 1.6);
-    amp.gain.setValueAtTime(gain, when);
+    amp.gain.setValueAtTime(0.8 * Math.min(level, 1.6), when);
     // Accent : attaque plus marquée, puis retour au niveau normal.
     if (level > 1) amp.gain.setTargetAtTime(0.8, when + 0.08, 0.08);
     amp.gain.setTargetAtTime(0, when + duration, release / 3);
@@ -408,10 +425,7 @@ export class TrumpetSamples {
   }
 }
 
-/** Instruments du lecteur : trompette enregistrée, ou synthétiseur (sans téléchargement). */
-export const INSTRUMENTS = { trumpet: "Trompette (enregistrée)", synth: "Synthétiseur" };
-
-export class TrumpetPlayer {
+export class ScorePlayer {
   constructor() {
     this.ctx = null;
     this.events = null;
@@ -422,7 +436,7 @@ export class TrumpetPlayer {
     this.bus = null;
     this.timer = null;
     this.instrument = "trumpet";
-    this.samples = null;
+    this.sampled = new Map(); // instrument → SampledInstrument (chargé une fois)
     this.onSamplesError = null; // appelé si les sons enregistrés ne se chargent pas
   }
 
@@ -498,17 +512,24 @@ export class TrumpetPlayer {
     return formant;
   }
 
+  /** Sons enregistrés de l'instrument choisi, déjà chargés ? */
+  get samplesReady() {
+    return this.instrument === "synth" || Boolean(this.sampled.get(this.instrument)?.sets);
+  }
+
   /** Sons enregistrés prêts (chargés à la première lecture), sinon null : synthétiseur. */
   async _samples() {
-    if (this.instrument !== "trumpet") return null;
-    this.samples ??= new TrumpetSamples(this.ctx);
+    const name = this.instrument;
+    if (!INSTRUMENTS[name] || name === "synth") return null;
+    if (!this.sampled.has(name)) this.sampled.set(name, new SampledInstrument(this.ctx, name));
+    const instrument = this.sampled.get(name);
     try {
-      await this.samples.load();
-      return this.samples;
+      await instrument.load();
+      return instrument;
     } catch (err) {
       console.warn(err);
       this.instrument = "synth";
-      this.onSamplesError?.(err);
+      this.onSamplesError?.(err, name);
       return null;
     }
   }

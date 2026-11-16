@@ -25,7 +25,7 @@ Outil en ligne pour **transposer une partition** fournie en PDF ou en image (JPG
   - **Nuances** : pp, mf, ff… et indications (cresc., rit.…) ; soufflets (crescendo <, decrescendo >) placés par deux clics entre les notes, au format MusicXML standard (`<wedge>`) dessiné par OSMD ; clic sur une barre de mesure pour un repère encadré (A, B, C…) ;
   - **Clé & mesure** : clé, armure (appliquée ou non aux notes) et chiffrage à partir d'une mesure ; durée d'une pause en mesures (le nombre s'affiche au-dessus de la pause).
 - Mesures dont la durée ne correspond pas au chiffrage encadrées en rouge ; annuler/rétablir et raccourcis clavier. Les corrections portent sur la partition d'origine : la transposition reste en direct.
-- Écoute de la partition transposée avec une vraie trompette enregistrée (VSCO 2 Community Edition, domaine public ; synthétiseur au choix ou en secours) (notes écrites ou sons réels, reprises et liaisons prises en compte), tempo réglable et curseur qui suit la lecture.
+- Écoute de la partition transposée avec un instrument enregistré au choix : trompette, flûte traversière, clarinette, saxophone ténor ou piano (VSCO 2 Community Edition et Versilian Community Sample Library, domaine public ; synthétiseur au choix ou en secours) (notes écrites ou sons réels, reprises et liaisons prises en compte), tempo réglable et curseur qui suit la lecture.
 
 ## Architecture
 
@@ -34,8 +34,8 @@ web/                 interface (HTML/CSS/JS, sans framework)
   transpose.js       moteur de transposition MusicXML (JS pur, testé sous Node)
   app.js             interface, rendu avec OpenSheetMusicDisplay, impression
   mxl.js             lecture MusicXML / .mxl, fichier de relecture (.mxl + originaux)
-  player.js          lecture audio (trompette enregistrée ou synthé, Web Audio)
-  samples/trumpet/   sons de trompette (préparés par scripts/prepare-trumpet-samples.py)
+  player.js          lecture audio (instruments enregistrés ou synthé, Web Audio)
+  samples/<instrument>/  sons enregistrés (préparés par scripts/prepare-samples.py)
   editor.js          analyse des mesures et opérations de correction (JS pur, testé sous Node)
   merge.js           fusion des pages reconnues (application de bureau ; même règle que le serveur)
   omr-time.js        chiffrage imposé à la reconnaissance (application de bureau ; même règle que le serveur)
